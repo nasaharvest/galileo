@@ -1,0 +1,26 @@
+{
+    "input_height_width": 64,
+    "num_timesteps": 1,
+    "num_classes": 2,
+    "is_multilabel": false,
+    "include_s1": false,
+    "dataset_name": "m-brick-kiln",
+    "benchmark_name": "classification_v1.0",
+    "task_type": "cls",
+    "band_info": {
+        "01 - Coastal aerosol": {"mean": 574.7587880700896, "std": 193.60631504991184},
+        "02 - Blue": {"mean": 674.3473615470523, "std": 238.75447480113132},
+        "03 - Green": {"mean": 886.3656479311578, "std": 276.9631260242207},
+        "04 - Red": {"mean": 815.0945462528913, "std": 361.15060137326634},
+        "05 - Vegetation Red Edge": {"mean": 1128.8088426870465, "std": 364.5888078793488},
+        "06 - Vegetation Red Edge": {"mean": 1934.450471876027, "std": 724.2707123576525},
+        "07 - Vegetation Red Edge": {"mean": 2045.7652282437202, "std": 819.653063972575},
+        "08 - NIR": {"mean": 2012.744587807115, "std": 794.3652427593881},
+        "08A - Vegetation Red Edge": {"mean": 1608.6255233989034, "std": 800.8538290702304},
+        "09 - Water vapour": {"mean": 1129.8171906000355, "std": 704.0219637458916},
+        "10 - SWIR - Cirrus": {"mean": 83.27188605598549, "std": 36.355745901131705},
+        "11 - SWIR": {"mean": 90.54924599052214, "std": 28.004671947623894},
+        "12 - SWIR": {"mean": 68.98768652434848, "std": 24.268892726362033}
+    },
+    "imputes": []
+}

@@ -1,0 +1,27 @@
+{
+    "input_height_width": 32,
+    "num_timesteps": 1,
+    "num_classes": 17,
+    "is_multilabel": false,
+    "include_s1": true,
+    "dataset_name": "m-so2sat",
+    "benchmark_name": "classification_v1.0",
+    "task_type": "cls",
+    "band_info": {
+        "02 - Blue": {"mean": 1295.1652705669403, "std": 406.80479258298874},
+        "03 - Green": {"mean": 1173.4361201524734, "std": 512.5178396701813},
+        "04 - Red": {"mean": 1137.4464631080627, "std": 725.4913449287415},
+        "05 - Vegetation Red Edge": {"mean": 1269.3354487419128, "std": 687.2648745775223},
+        "06 - Vegetation Red Edge": {"mean": 1691.7912662029266, "std": 740.2216643095016},
+        "07 - Vegetation Red Edge": {"mean": 1908.0990552902222, "std": 841.2779122591019},
+        "08 - NIR": {"mean": 1838.1330370903015, "std": 853.4552156925201},
+        "08A - Vegetation Red Edge": {"mean": 2051.7952740192413, "std": 924.8979389667511},
+        "11 - SWIR": {"mean": 1762.811541557312, "std": 1027.0608961582184},
+        "12 - SWIR": {"mean": 1286.638230085373, "std": 928.4552931785583}
+    },
+    "imputes":[
+        ["02 - Blue", "01 - Coastal aerosol"],
+        ["08A - Vegetation Red Edge", "09 - Water vapour"],
+        ["11 - SWIR", "10 - SWIR - Cirrus"]
+    ]
+}

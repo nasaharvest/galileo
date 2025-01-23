@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - '*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    steps:
+    - name: Clone repo
+      uses: actions/checkout@v3
+    - name: Set up python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+        cache: 'pip'
+    - name: Install dependencies
+      run: pip install -r requirements-dev.txt
+    - name: ruff linter
+      run: python -m  ruff check .
+    - name: ruff formatter
+      run: python -m ruff format --check .
+    - name: mypy
+      run: python -m mypy .
+    - name: unit tests
+      run: python -m unittest discover -s tests

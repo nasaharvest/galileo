@@ -1,0 +1,5 @@
+[tool.ruff]
+# Enable the isort rules.
+lint.extend-select = ["I"]
+line-length = 99
+exclude = ["anysat"]

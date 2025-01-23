@@ -1,0 +1,25 @@
+{
+    "input_height_width": 1,
+    "num_timesteps": 12,
+    "num_classes": 9,
+    "is_multilabel": false,
+    "include_s1": false,
+    "dataset_name": "breizhcrops",
+    "task_type": "cls",
+    "band_info": {
+        "01 - Coastal aerosol": {"mean": 3254.1433, "std": 2148.5647},
+        "02 - Blue": {"mean": 288.4604, "std": 544.2625},
+        "03 - Green": {"mean": 2729.1228, "std": 1146.0743},
+        "04 - Red": {"mean": 1857.3398, "std": 985.2388},
+        "05 - Vegetation Red Edge": {"mean": 2999.3413, "std": 2194.9316},
+        "06 - Vegetation Red Edge": {"mean": 2742.9236, "std": 2055.1450},
+        "07 - Vegetation Red Edge": {"mean": 2749.7593, "std": 2285.5239},
+        "08 - NIR": {"mean": 2992.1721, "std": 2134.8782},
+        "08A - Vegetation Red Edge": {"mean": 3702.4248, "std": 1794.7379},
+        "09 - Water vapour": {"mean": 4056.3201, "std": 1752.6676},
+        "10 - SWIR - Cirrus": {"mean": 3914.2307, "std": 1649.3500},
+        "11 - SWIR": {"mean": 4290.2134, "std": 11693.7297},
+        "12 - SWIR": {"mean": 1697.6628, "std": 1239.9095}
+    },
+    "imputes":[]
+}

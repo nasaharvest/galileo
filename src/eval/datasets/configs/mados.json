@@ -1,0 +1,28 @@
+{
+    "input_height_width": 80,
+    "segmentation_map_height_width": 80,
+    "num_timesteps": 1,
+    "num_classes": 15,
+    "dataset_name": "mados",
+    "task_type": "seg",
+    "band_info": {
+        "01 - Coastal aerosol": {"mean": 0.05834943428635597, "std": 0.021028317511081696},
+        "02 - Blue": {"mean": 0.05259967967867851, "std": 0.024127380922436714},
+        "03 - Green": {"mean": 0.044100478291511536, "std": 0.027077781036496162},
+        "04 - Red": {"mean": 0.036041468381881714, "std": 0.028892582282423973},
+        "05 - Vegetation Red Edge": {"mean": 0.03370574489235878, "std": 0.028282219544053078},
+        "06 - Vegetation Red Edge": {"mean": 0.034933559596538544, "std": 0.03273169696331024},
+        "07 - Vegetation Red Edge": {"mean": 0.03616137430071831, "std": 0.04026992991566658},
+        "08 - NIR": {"mean": 0.03185819461941719, "std": 0.03786701336503029},
+        "08A - Vegetation Red Edge": {"mean": 0.0348929800093174, "std": 0.04325847327709198},
+        "09 - Water vapour": {"mean": 0.0348929800093174, "std": 0.04325847327709198},
+        "10 - SWIR - Cirrus": {"mean": 0.029205497354269028, "std": 0.0350610613822937},
+        "11 - SWIR": {"mean": 0.023518012836575508, "std": 0.02930651605129242},
+        "12 - SWIR": {"mean": 0.017942268401384354, "std": 0.022308016195893288}
+    },
+    "imputes":[
+        ["05 - Vegetation Red Edge", "06 - Vegetation Red Edge"],
+        ["08A - Vegetation Red Edge", "09 - Water vapour"],
+        ["11 - SWIR", "10 - SWIR - Cirrus"]
+    ]
+}

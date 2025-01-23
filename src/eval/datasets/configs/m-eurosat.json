@@ -1,0 +1,26 @@
+{
+    "input_height_width": 64,
+    "num_timesteps": 1,
+    "num_classes": 10,
+    "is_multilabel": false,
+    "include_s1": false,
+    "dataset_name": "m-eurosat",
+    "benchmark_name": "classification_v1.0",
+    "task_type": "cls",
+    "band_info": {
+        "01 - Coastal aerosol": {"mean": 1356.781697, "std": 246.33561916377468},
+        "02 - Blue": {"mean": 1123.138498, "std": 334.2812437339313},
+        "03 - Green": {"mean": 1057.277004, "std": 392.23216876587765},
+        "04 - Red": {"mean": 959.177867, "std": 590.9418161327985},
+        "05 - Vegetation Red Edge": {"mean": 1227.443061, "std": 548.5731927172071},
+        "06 - Vegetation Red Edge": {"mean": 2076.627481, "std": 843.0791015714925},
+        "07 - Vegetation Red Edge": {"mean": 2463.433444, "std": 1071.7334272748515},
+        "08 - NIR": {"mean": 2390.318277, "std": 1106.8683069574047},
+        "08A - Vegetation Red Edge": {"mean": 761.551869, "std": 404.41362891674027},
+        "09 - Water vapour": {"mean": 12.334183, "std": 5.0792565127694616},
+        "10 - SWIR - Cirrus": {"mean": 1861.292046, "std": 963.0321641072711},
+        "11 - SWIR": {"mean": 1138.935835, "std": 742.7946556551501},
+        "12 - SWIR": {"mean": 2699.777603, "std": 1215.0411476154109}
+    },
+    "imputes": []
+}

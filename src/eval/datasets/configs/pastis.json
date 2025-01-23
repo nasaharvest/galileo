@@ -1,0 +1,23 @@
+{
+    "input_height_width": 64,
+    "segmentation_map_height_width": 64,
+    "num_timesteps": 12,
+    "num_classes": 19,
+    "dataset_name": "pastis",
+    "task_type": "seg",
+    "band_info": {
+        "01 - Coastal aerosol": {"mean": 1201.6458740234375, "std": 1254.5341796875},
+        "02 - Blue": {"mean": 1201.6458740234375, "std": 1254.5341796875},
+        "03 - Green": {"mean": 1398.6396484375, "std": 1200.8133544921875},
+        "04 - Red": {"mean": 1452.169921875, "std": 1260.5355224609375},
+        "05 - Vegetation Red Edge": {"mean": 1783.147705078125, "std": 1188.0682373046875},
+        "06 - Vegetation Red Edge": {"mean": 2698.783935546875, "std": 1163.632080078125},
+        "07 - Vegetation Red Edge": {"mean": 3022.353271484375, "std": 1220.4384765625},
+        "08 - NIR": {"mean": 3164.72802734375, "std": 1237.6727294921875},
+        "08A - Vegetation Red Edge": {"mean": 3270.47412109375, "std": 1232.5126953125},
+        "09 - Water vapour": {"mean": 3270.47412109375, "std": 1232.5126953125},
+        "10 - SWIR - Cirrus": {"mean": 2392.800537109375, "std": 930.82861328125},
+        "11 - SWIR": {"mean": 2392.800537109375, "std": 930.82861328125},
+        "12 - SWIR": {"mean": 1632.4835205078125, "std": 829.1475219726562}
+    }
+}

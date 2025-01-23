@@ -1,0 +1,15 @@
+{
+    "input_height_width": 64,
+    "segmentation_map_height_width": 64,
+    "num_timesteps": 1,
+    "num_classes": 2,
+    "dataset_name": "sen1floods11",
+    "task_type": "seg",
+    "band_info": {
+        "s1": {
+            "VV": {"mean": -11.27174944, "std": 4.81716083},
+            "VH": {"mean": -18.4847947, "std": 5.79660676}
+        }
+    },
+    "imputes":[]
+}

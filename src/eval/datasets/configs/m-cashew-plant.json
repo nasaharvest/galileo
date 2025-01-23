@@ -1,0 +1,28 @@
+{
+    "input_height_width": 256,
+    "segmentation_map_height_width": 64,
+    "num_timesteps": 1,
+    "num_classes": 7,
+    "is_multilabel": false,
+    "include_s1": false,
+    "dataset_name": "m-cashew-plant",
+    "benchmark_name": "segmentation_v1.0",
+    "task_type": "seg",
+    "band_info": {
+        "01 - Coastal aerosol": {"mean": 520.1185302734375, "std": 204.2023468017578},
+        "02 - Blue": {"mean": 634.7583618164062, "std": 227.25344848632812},
+        "03 - Green": {"mean": 892.461181640625, "std": 222.32545471191406},
+        "04 - Red": {"mean": 880.7075805664062, "std": 350.47235107421875},
+        "05 - Vegetation Red Edge": {"mean": 1380.6409912109375, "std": 280.6436767578125},
+        "06 - Vegetation Red Edge": {"mean": 2233.432373046875, "std": 373.7521057128906},
+        "07 - Vegetation Red Edge": {"mean": 2549.379638671875, "std": 449.9236145019531},
+        "08 - NIR": {"mean": 2643.248046875, "std": 414.6498107910156},
+        "08A - Vegetation Red Edge": {"mean": 2643.531982421875, "std": 415.1019592285156},
+        "09 - Water vapour": {"mean": 2852.87451171875, "std": 413.8980407714844},
+        "11 - SWIR": {"mean": 2463.933349609375, "std": 494.97430419921875},
+        "12 - SWIR": {"mean": 1600.9207763671875, "std": 514.4229736328125}
+    },
+    "imputes":[
+        ["11 - SWIR", "10 - SWIR - Cirrus"]
+    ]
+}
