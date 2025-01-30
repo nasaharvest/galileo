@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange
 from fast_pytorch_kmeans import KMeans
 from scipy import stats
 from scipy.optimize import linear_sum_assignment
@@ -31,25 +30,6 @@ def hungarian_match(flat_preds, flat_targets, preds_k, targets_k):
         res[out_c] = gt_c
 
     return res
-
-
-def create_patch_labels(labels, patch_size):
-    # labels are shape (N, H, W)
-    labels = rearrange(labels, "n (h i) (w j) -> n (h w) (i j)", i=patch_size, j=patch_size)
-    labels = rearrange(labels, "n l d -> (n l) d")
-
-    mode_labels = []
-    ids_to_keep = []
-    for i in range(labels.shape[0]):
-        patch_labels = labels[i]  # (d)
-        valid_patch_labels = patch_labels[patch_labels != -1]
-
-        if valid_patch_labels.numel() > 0:
-            patch_mode = torch.mode(valid_patch_labels).values.item()
-            mode_labels.append(patch_mode)
-            ids_to_keep.append(i)
-
-    return torch.LongTensor(mode_labels), torch.LongTensor(ids_to_keep)
 
 
 def run_knn_or_kmeans(
