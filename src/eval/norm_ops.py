@@ -4,7 +4,14 @@ from .baseline_models import BASELINE_MODELS
 
 
 def norm_type_from_model_name(model_name: str) -> Tuple[str, int]:
-    standardizing_models = ["dofa_large", "dofa_base", "mmearth_atto", "presto", "anysat"]
+    standardizing_models = [
+        "dofa_large",
+        "dofa_base",
+        "mmearth_atto",
+        "presto",
+        "anysat",
+        "prithvi",
+    ]
     for m in standardizing_models:
         assert m in BASELINE_MODELS, f"{m} not in BASELINE_MODELS"
     if model_name in standardizing_models:
@@ -29,6 +36,11 @@ def get_all_norm_strats(model_name, s1_or_s2: str = "s2") -> List:
         if s1_or_s2 != "s1":
             raise ValueError(f"Expected s1_or_s2 to be 's1' or 's2', got {s1_or_s2}")
         datasets = ["dataset", "S1", "OURS_S1", "presto_s1"]
+
+    if model_name == "prithvi":
+        # the Prithvi norm bands only cover a subset of bands,
+        # so they are not applicable for other models
+        datasets.append("prithvi2")
 
     # std_multiplier = 1.4, 1.6, ... 2.6
     norm_stats = [

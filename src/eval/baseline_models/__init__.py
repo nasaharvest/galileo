@@ -7,6 +7,7 @@ from .decur import DeCurWrapper
 from .dofa import DOFAWrapper
 from .mmearth import MMEarthWrapper  # type: ignore
 from .presto import PrestoWrapper, UnWrappedPresto
+from .prithvi import PrithviWrapper  # type: ignore
 from .satlas import SatlasWrapper
 from .satmae import SatMAEWrapper
 from .softcon import SoftConWrapper
@@ -22,6 +23,7 @@ __all__ = [
     "PrestoWrapper",
     "AnySatWrapper",
     "UnWrappedPresto",
+    "PrithviWrapper",
 ]
 
 
@@ -127,6 +129,7 @@ def construct_model_dict(weights_path: Path, s1_or_s2: str) -> Dict:
             "args": {},
         },
         "anysat": {"model": AnySatWrapper, "args": {}},
+        "prithvi": {"model": PrithviWrapper, "args": {"weights_path": weights_path}},
     }
     return model_dict
 

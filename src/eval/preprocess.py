@@ -143,6 +143,41 @@ PRESTO_S2_DIV_VALUES = [float(1e4)] * len(OURS_S2_MEAN)
 S1_MEAN = [-12.54847273, -20.19237134]
 S1_STD = [5.25697717, 5.91150917]
 
+# for Prithvi, true values are ["B02", "B03", "B04", "B05", "B06", "B07"]
+# for all other bands, we just copy the nearest relevant band value; Prithvi
+# shouldn't be using them anyway
+PRITHVI_MEAN = [
+    1087.0,
+    1087.0,
+    1342.0,
+    1433.0,
+    2734.0,
+    1958.0,
+    1363.0,
+    1363.0,
+    1363.0,
+    1363.0,
+    1363.0,
+    1363.0,
+    1363.0,
+]
+PRITHVI_STD = [
+    2248.0,
+    2248.0,
+    2179.0,
+    2178.0,
+    1850.0,
+    1242.0,
+    1049.0,
+    1049.0,
+    1049.0,
+    1049.0,
+    1049.0,
+    1049.0,
+    1049.0,
+]
+
+
 pre_computed_stats = {
     "SATMAE": {"mean": SATMAE_MEAN, "std": SATMAE_STD},
     "S2A": {"mean": S2A_MEAN, "std": S2A_STD},
