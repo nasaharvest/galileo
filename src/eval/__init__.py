@@ -6,7 +6,7 @@ from .datasets.mados_dataset import MADOSDataset
 from .datasets.pastis import PASTISDataset
 from .datasets.sen1floods11 import Sen1Floods11Dataset
 from .eval import get_embeddings, get_loaders
-from .knn import run_knn_or_kmeans
+from .knn import run_knn
 from .linear_probe import PROBING_LRs, train_and_eval_probe_cls, train_and_eval_probe_seg
 from .norm_ops import get_all_norm_strats, norm_type_from_model_name
 
@@ -21,7 +21,7 @@ __all__ = [
     "append_to_csv",
     "get_loaders",
     "get_embeddings",
-    "run_knn_or_kmeans",
+    "run_knn",
     "PROBING_LRs",
     "train_and_eval_probe_cls",
     "train_and_eval_probe_seg",
