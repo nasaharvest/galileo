@@ -951,6 +951,7 @@ class Encoder(GalileoBase):
         input_resolution_m: Optional[int] = BASE_GSD,
         exit_after: Optional[int] = None,
         token_exit_cfg: Optional[Dict] = None,
+        add_layernorm_on_exit: bool = True,
     ):
         (
             s_t_x,
@@ -982,11 +983,16 @@ class Encoder(GalileoBase):
                 token_exit_cfg=token_exit_cfg,
             )
 
+        if add_layernorm_on_exit:
+            s_t_x = self.norm(s_t_x)
+            sp_x = self.norm(sp_x)
+            t_x = self.norm(t_x)
+            st_x = self.norm(st_x)
         return (
-            self.norm(s_t_x),
-            self.norm(sp_x),
-            self.norm(t_x),
-            self.norm(st_x),
+            s_t_x,
+            sp_x,
+            t_x,
+            st_x,
             s_t_m,
             sp_m,
             t_m,
@@ -1307,7 +1313,12 @@ class GalileoWrapper(nn.Module):
     ]
 
     def __init__(
-        self, pretrained_path: Path, patch_size: int = 8, month: int = 6, do_pool: bool = True
+        self,
+        pretrained_path: Path,
+        patch_size: int = 8,
+        month: int = 6,
+        do_pool: bool = True,
+        add_layernorm_on_exit: bool = True,
     ):
         super().__init__()
         self.encoder = Encoder.load_from_folder(pretrained_path)
@@ -1328,6 +1339,7 @@ class GalileoWrapper(nn.Module):
         self.s_t_channels_s1 = [
             idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S1" in key
         ]
+        self.add_layernorm_on_exit = add_layernorm_on_exit
 
     def preproccess(
         self,
@@ -1437,6 +1449,7 @@ class GalileoWrapper(nn.Module):
             st_m,
             month,
             patch_size=self.patch_size,
+            add_layernorm_on_exit=self.add_layernorm_on_exit,
         )
         s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m, _ = output
         if self.do_pool:

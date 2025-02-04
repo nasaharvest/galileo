@@ -29,11 +29,10 @@ PROBING_LRs = {
         5e-1,
         8e-1,
     ],
-    "MLP": [1e-4, 3e-4, 5e-4, 8e-4, 1e-3, 3e-3, 5e-3, 8e-3, 1e-2, 3e-2, 5e-2, 8e-2],
 }
 
 
-def train_and_eval_probe_cls(lr, config, loaders, in_features, probe_type, device):
+def train_and_eval_probe_cls(lr, config, loaders, in_features, device):
     probe = train_probe_cls(
         data_loader=loaders["train"],
         lr=lr,
@@ -41,7 +40,6 @@ def train_and_eval_probe_cls(lr, config, loaders, in_features, probe_type, devic
         in_features=in_features,
         num_classes=config["num_classes"],
         is_multilabel=config["is_multilabel"],
-        probe_type=probe_type,
         device=device,
     )
     val_acc = evaluate_probe_cls(
@@ -59,7 +57,7 @@ def train_and_eval_probe_cls(lr, config, loaders, in_features, probe_type, devic
     return val_acc, test_acc
 
 
-def train_and_eval_probe_seg(lr, config, loaders, in_features, grid_size, probe_type, device):
+def train_and_eval_probe_seg(lr, config, loaders, in_features, grid_size, device):
     output_patch_size = math.ceil(config["segmentation_map_height_width"] / grid_size)
     probe = train_probe_seg(
         data_loader=loaders["train"],
@@ -68,7 +66,6 @@ def train_and_eval_probe_seg(lr, config, loaders, in_features, grid_size, probe_
         in_features=in_features,
         num_classes=config["num_classes"],
         patch_size=output_patch_size,
-        probe_type=probe_type,
         device=device,
     )
     val_miou = evaluate_probe_seg(
@@ -95,22 +92,11 @@ def train_probe_cls(
     in_features,
     num_classes,
     is_multilabel,
-    probe_type,
     device,
 ):
-    assert probe_type in ["LP", "MLP"]
-    if probe_type == "LP":
-        probe = nn.Sequential(nn.BatchNorm1d(in_features), nn.Linear(in_features, num_classes)).to(
-            device
-        )
-    else:
-        probe = nn.Sequential(
-            nn.BatchNorm1d(in_features),
-            nn.Linear(in_features, 2048),
-            nn.GELU(),
-            nn.Linear(2048, num_classes),
-        ).to(device)
-
+    probe = nn.Sequential(nn.BatchNorm1d(in_features), nn.Linear(in_features, num_classes)).to(
+        device
+    )
     opt = torch.optim.AdamW(probe.parameters(), lr=lr)
 
     sched_config = {
@@ -185,18 +171,10 @@ def train_probe_seg(
     in_features,
     num_classes,
     patch_size,
-    probe_type,
     device,
 ):
     logits_per_patch = int(num_classes * patch_size * patch_size)
-    assert probe_type in ["LP", "MLP"]
-    if probe_type == "LP":
-        probe = nn.Sequential(nn.Linear(in_features, logits_per_patch)).to(device)
-    else:
-        probe = nn.Sequential(
-            nn.Linear(in_features, 2048), nn.GELU(), nn.Linear(2048, logits_per_patch)
-        ).to(device)
-
+    probe = nn.Sequential(nn.Linear(in_features, logits_per_patch)).to(device)
     opt = torch.optim.AdamW(probe.parameters(), lr=lr)
 
     sched_config = {

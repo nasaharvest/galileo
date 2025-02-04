@@ -2,6 +2,7 @@ from .baseline_models.anysat import AnySatBinaryCropHarvestEval, AnySatNormalize
 from .baseline_models.presto import PrestoBinaryCropHarvestEval, PrestoNormalizer
 from .cropharvest.cropharvest_eval import BinaryCropHarvestEval, MultiClassCropHarvestEval
 from .datasets.breizhcrops import BreizhCropsDataset
+from .datasets.geobench import GeobenchDataset
 from .datasets.mados_dataset import MADOSDataset
 from .datasets.pastis import PASTISDataset
 from .datasets.sen1floods11 import Sen1Floods11Dataset
