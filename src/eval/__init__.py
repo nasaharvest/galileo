@@ -7,6 +7,7 @@ from .datasets.mados_dataset import MADOSDataset
 from .datasets.pastis import PASTISDataset
 from .datasets.sen1floods11 import Sen1Floods11Dataset
 from .eval import get_embeddings, get_loaders
+from .finetune import FT_LRs, finetune_and_eval_cls, finetune_and_eval_seg
 from .knn import run_knn
 from .linear_probe import PROBING_LRs, train_and_eval_probe_cls, train_and_eval_probe_seg
 from .norm_ops import get_all_norm_strats, norm_type_from_model_name
@@ -33,4 +34,7 @@ __all__ = [
     "PrestoNormalizer",
     "AnySatBinaryCropHarvestEval",
     "AnySatNormalizer",
+    "finetune_and_eval_cls",
+    "finetune_and_eval_seg",
+    "FT_LRs",
 ]

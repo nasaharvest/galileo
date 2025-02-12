@@ -2,7 +2,7 @@ import argparse
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from typing import Optional, cast
 
 import pandas as pd
 from torch.utils.data import DataLoader, TensorDataset
@@ -180,7 +180,10 @@ if eval_mode == "LP":
         savepath_prefix = f"{savepath_prefix}_runid{arg_run_id}"
 
     if arg_lr is None:
-        lrs_to_use = e.PROBING_LRs[eval_mode]
+        if eval_mode == "LP":
+            lrs_to_use = e.PROBING_LRs[eval_mode]
+        else:
+            lrs_to_use = e.FT_LRs
     else:
         print(f"Replacing full lr sweep with {arg_lr}")
         lrs_to_use = [arg_lr]
@@ -217,6 +220,7 @@ if "cropharvest" not in benchmark_name:
             pretrained_path=weights_path,
             patch_size=patch_size,
             do_pool=do_pool,
+            add_layernorm_on_exit=False if eval_mode == "FT" else True,
         ).to(device)
 
         if benchmark_name == "mados":
@@ -237,25 +241,27 @@ if "cropharvest" not in benchmark_name:
             # following advice from https://arxiv.org/pdf/2305.13456
             default_norm_strat = {"stats": "OURS", "type": "norm_no_clip", "std_multiplier": 2.0}
 
+    norms_for_model = e.get_all_norm_strats(model_name, s1_or_s2)
     if sweep_norms:
-        norms_to_use = e.get_all_norm_strats(model_name, s1_or_s2)
+        norms_to_use = norms_for_model
     else:
         if norm_dataset is not None:
             if norm_dataset == "satlas":
                 norms_to_use = [{"type": "satlas"}]
             else:
                 norm_type, _ = e.norm_type_from_model_name(model_name)
-                if norm_std_multiplier is None:
-                    raise ValueError(
-                        f"norm_std_multiplier must be passed for norm_dataset {norm_dataset}"
-                    )
-                norms_to_use = [
-                    {
-                        "type": norm_type,
-                        "stats": norm_dataset,
-                        "std_multiplier": norm_std_multiplier,
-                    }
-                ]
+                if norm_std_multiplier is not None:
+                    norms_to_use = [
+                        {
+                            "type": norm_type,
+                            "stats": norm_dataset,
+                            "std_multiplier": norm_std_multiplier,
+                        }
+                    ]
+                else:
+                    norms_to_use = [
+                        norm for norm in norms_for_model if norm.get("stats", "") == norm_dataset
+                    ]
 
         else:
             # default if its not in the config
@@ -286,7 +292,7 @@ if "cropharvest" not in benchmark_name:
             )
             print(f"In eval, {len(loaders['train'])}")
 
-            if eval_mode in ["KNN-5", "KNN-20"]:
+            if eval_mode in ["KNN-5", "KNN-20", "K-Means"]:
                 if config["task_type"] != "cls":
                     raise ValueError(
                         f"{eval_mode} not supported for {benchmark_name} of task type cls"
@@ -351,8 +357,15 @@ if "cropharvest" not in benchmark_name:
                 results.to_csv(savepath, index=False)
 
             elif eval_mode == "LP":
+                if (model_name == "anysat") and config["task_type"] == "seg":
+                    train_subsample: Optional[float] = 1 / 16
+                else:
+                    train_subsample = None
                 t_e, t_l = e.get_embeddings(
-                    data_loader=loaders["train"], model=encoder, device=device
+                    data_loader=loaders["train"],
+                    model=encoder,
+                    device=device,
+                    subsample_tokens=train_subsample,
                 )
                 v_e, v_l = e.get_embeddings(
                     data_loader=loaders["valid"], model=encoder, device=device
@@ -409,6 +422,61 @@ if "cropharvest" not in benchmark_name:
                                 f"task_type must be cls or seg, not {config['task_type']}"
                             )
 
+                        new_df = pd.DataFrame(
+                            {
+                                "model_name": [model_name],
+                                "benchmark": [benchmark_name],
+                                "partition": [train_partition],
+                                "val": [val],
+                                "test": [test],
+                                "lr": [lr],
+                                "run_id": [run_id],
+                                "norm_op": [str(norm_strat)],
+                            }
+                        )
+                        print(new_df)
+                        if results is not None:
+                            results = pd.concat([results, new_df], axis=0)
+                        else:
+                            results = new_df
+
+                        results.to_csv(savepath, index=False)
+
+            elif eval_mode == "FT":
+                cache_dir = output_folder / "ft_cache"
+                cache_dir.mkdir(exist_ok=True)
+                for run_id in runs_to_use:
+                    for lr in lrs_to_use:
+                        if (results is not None) and (
+                            len(
+                                results[
+                                    (results["partition"] == train_partition)
+                                    & (results["lr"] == lr)
+                                    & (results["run_id"] == run_id)
+                                    & (results["norm_op"] == str(norm_strat))
+                                ]
+                            )
+                            > 0
+                        ):
+                            print(f"{train_partition}, {run_id}, {lr} in results - skipping")
+                            continue
+                        if config["task_type"] == "cls":
+                            val, test = e.finetune_and_eval_cls(
+                                lr=lr,
+                                config=config,
+                                loaders=loaders,
+                                encoder=encoder,
+                                device=device,
+                                cache_dir=cache_dir,
+                            )
+                        elif config["task_type"] == "seg":
+                            val, test = e.finetune_and_eval_seg(
+                                lr=lr,
+                                config=config,
+                                loaders=loaders,
+                                encoder=encoder,
+                                device=device,
+                            )
                         new_df = pd.DataFrame(
                             {
                                 "model_name": [model_name],

@@ -39,7 +39,7 @@ class AnySatWrapper(nn.Module):
     def __init__(self, do_pool=True, temporal_pooling: str = "mean"):
         super().__init__()
         self.model = AnySat.from_pretrained("base", flash_attn=False)
-        self.dim = 768
+
         self.grid_size: Optional[int] = None
 
         self.kept_s2_band_idx = [
@@ -54,8 +54,11 @@ class AnySatWrapper(nn.Module):
         self.do_pool = do_pool
         if do_pool:
             self.output = "tile"  # single vector per tile
+            self.dim = 768
         else:
-            self.output = "patch"
+            self.output = "dense"
+            self.dim = 768 * 2  # this is the case for dense for both s1 and s2
+            self.patch_size = 1  # a token is output for every pixel
 
     @staticmethod
     def months_to_day_of_year(months: torch.Tensor):
@@ -74,12 +77,13 @@ class AnySatWrapper(nn.Module):
         # = more tokens, this should lead to the best performance
         h_in_m = h * 10
         patch_size = min(40, h_in_m)
-        self.grid_size = h_in_m // patch_size
+        self.grid_size = h_in_m  # with dense, a token is outputted for every pixel
         return patch_size
 
     def forward(self, s2=None, s1=None, months=None):
         input_dictionary: Dict = {}
         if s2 is not None:
+            output_modality = "s2"
             patch_size = self.calculate_patch_size_and_update_grid_size(s2.shape[1])
             if len(s2.shape) == 4:
                 s2 = repeat(s2, "b h w d -> b t d h w", t=1)[:, :, self.kept_s2_band_idx, :, :]
@@ -95,6 +99,7 @@ class AnySatWrapper(nn.Module):
             # months should always be passed unless
             input_dictionary.update({"s2": s2, "s2_dates": s2_doy})
         if s1 is not None:
+            output_modality = "s1"
             patch_size = self.calculate_patch_size_and_update_grid_size(s1.shape[1])
             if len(s1.shape) == 4:
                 s1 = repeat(s1, "b h w d -> b t d h w", t=1)[:, :, self.kept_s1_band_idx, :, :]
@@ -112,7 +117,12 @@ class AnySatWrapper(nn.Module):
             s1 = torch.concat((s1, ratio_band), dim=2)
             input_dictionary.update({"s1": s1, "s1_dates": s1_doy})
 
-        output_patches = self.model(x=input_dictionary, patch_size=patch_size, output=self.output)
-        if self.output == "patch":
+        output_patches = self.model(
+            x=input_dictionary,
+            patch_size=patch_size,
+            output=self.output,
+            output_modality=output_modality,
+        )
+        if self.output == "dense":
             output_patches = rearrange(output_patches, "b h w d -> b (h w) d")
         return output_patches

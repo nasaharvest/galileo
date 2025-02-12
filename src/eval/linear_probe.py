@@ -171,10 +171,18 @@ def train_probe_seg(
     in_features,
     num_classes,
     patch_size,
+    probe_type,
     device,
 ):
     logits_per_patch = int(num_classes * patch_size * patch_size)
-    probe = nn.Sequential(nn.Linear(in_features, logits_per_patch)).to(device)
+    assert probe_type in ["LP", "MLP"]
+    if probe_type == "LP":
+        probe = nn.Sequential(nn.Linear(in_features, logits_per_patch)).to(device)
+    else:
+        probe = nn.Sequential(
+            nn.Linear(in_features, 2048), nn.GELU(), nn.Linear(2048, logits_per_patch)
+        ).to(device)
+
     opt = torch.optim.AdamW(probe.parameters(), lr=lr)
 
     sched_config = {
@@ -194,22 +202,34 @@ def train_probe_seg(
 
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 logits = probe(batch_emb)  # (bsz, num_patches, logits_per_patch)
-                logits = rearrange(
-                    logits,
-                    "b (h w) (c i j) -> b c (h i) (w j)",
-                    h=spatial_patches_per_dim,
-                    w=spatial_patches_per_dim,
-                    c=num_classes,
-                    i=patch_size,
-                    j=patch_size,
-                )
-                if logits.shape[-2] != batch_labels.shape[-2]:
-                    logits = F.interpolate(
+
+                # this is a bit hackey
+                if batch_labels.shape[1] == batch_labels.shape[2]:
+                    logits = rearrange(
                         logits,
-                        size=(batch_labels.shape[-2], batch_labels.shape[-1]),
-                        mode="bilinear",
-                        align_corners=True,
-                    )  # (bsz, num_classes, H, W)
+                        "b (h w) (c i j) -> b c (h i) (w j)",
+                        h=spatial_patches_per_dim,
+                        w=spatial_patches_per_dim,
+                        c=num_classes,
+                        i=patch_size,
+                        j=patch_size,
+                    )
+                    if logits.shape[-2] != batch_labels.shape[-2]:
+                        logits = F.interpolate(
+                            logits,
+                            size=(batch_labels.shape[-2], batch_labels.shape[-1]),
+                            mode="bilinear",
+                            align_corners=True,
+                        )  # (bsz, num_classes, H, W)
+                else:
+                    # otherwise, we subsampled in the get_embeddings step
+                    logits = rearrange(
+                        logits,
+                        "b t (c i j) -> b c t (i j)",
+                        c=num_classes,
+                        i=patch_size,
+                        j=patch_size,
+                    )
                 loss = loss_function(logits, batch_labels.to(device))
 
             loss.backward()

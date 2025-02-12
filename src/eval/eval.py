@@ -11,9 +11,11 @@ from torch.utils.data import DataLoader
 logger = logging.getLogger("__main__")
 
 
-def get_embeddings(data_loader, model, device):
+def get_embeddings(data_loader, model, device, subsample_tokens: Optional[float] = None):
     embeddings = []
     labels = []
+    if subsample_tokens:
+        print(f"Subsampling tokens with ratio {subsample_tokens}")
 
     model = model.eval()
     with torch.no_grad():
@@ -27,15 +29,33 @@ def get_embeddings(data_loader, model, device):
                 batch["months"] = batch["months"].to(device).long()
 
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                batch_embeddings = model(**batch)  # (bsz, dim)
+                batch_embeddings = model(**batch)  # (bsz, dim) or (bsz, tokens, dim)
+
+            if subsample_tokens is not None:
+                if len(batch_embeddings.shape) < 3:
+                    raise ValueError("subsample tokens only works for segmentation tasks")
+                num_tokens_per_instance = batch_embeddings.shape[1]
+                num_instances_to_keep = int(num_tokens_per_instance * subsample_tokens)
+                sampled_indices = torch.randperm(num_tokens_per_instance)[:num_instances_to_keep]
+                batch_embeddings = batch_embeddings[:, sampled_indices]
+
+                tokens_per_dim = int(num_tokens_per_instance**0.5)
+                pixels_per_token_dim = int(batch_labels.shape[1] / tokens_per_dim)
+
+                batch_labels_per_token = rearrange(
+                    batch_labels,
+                    "b (t_h p_h) (t_w p_w) -> b (t_h t_w) (p_h p_w)",
+                    t_h=tokens_per_dim,
+                    t_w=tokens_per_dim,
+                    p_h=pixels_per_token_dim,
+                    p_w=pixels_per_token_dim,
+                )
+                batch_labels = batch_labels_per_token[:, sampled_indices]
 
             embeddings.append(batch_embeddings.to(torch.bfloat16).cpu())
             labels.append(batch_labels)
 
-    embeddings = torch.cat(embeddings, dim=0)  # (N, dim)
-    labels = torch.cat(labels, dim=0)  # (N)
-
-    return embeddings, labels
+    return torch.cat(embeddings, dim=0), torch.cat(labels, dim=0)
 
 
 class DownstreamAugs(object):
