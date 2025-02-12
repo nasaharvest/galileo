@@ -2,8 +2,10 @@ import collections.abc
 import itertools
 import json
 import math
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import OrderedDict as OrderedDictType
 
 import numpy as np
 import torch
@@ -13,23 +15,171 @@ from einops import rearrange, repeat
 from torch import Tensor, vmap
 from torch.jit import Final
 
-from .config import BASE_GSD
-from .data import (
-    SPACE_BAND_GROUPS_IDX,
-    SPACE_TIME_BANDS_GROUPS_IDX,
-    STATIC_BAND_GROUPS_IDX,
-    TIME_BAND_GROUPS_IDX,
+# constants
+CONFIG_FILENAME = "config.json"
+ENCODER_FILENAME = "encoder.pt"
+BASE_GSD = 10
+
+# band information
+S1_BANDS = ["VV", "VH"]
+S2_BANDS = [
+    "B2",
+    "B3",
+    "B4",
+    "B5",
+    "B6",
+    "B7",
+    "B8",
+    "B8A",
+    "B11",
+    "B12",
+]
+ERA5_BANDS = ["temperature_2m", "total_precipitation_sum"]
+TC_BANDS = ["def", "soil", "aet"]
+VIIRS_BANDS = ["avg_rad"]
+SRTM_BANDS = ["elevation", "slope"]
+DW_BANDS = [
+    "DW_water",
+    "DW_trees",
+    "DW_grass",
+    "DW_flooded_vegetation",
+    "DW_crops",
+    "DW_shrub_and_scrub",
+    "DW_built",
+    "DW_bare",
+    "DW_snow_and_ice",
+]
+WC_BANDS = [
+    "WC_temporarycrops",
+    "WC_maize",
+    "WC_wintercereals",
+    "WC_springcereals",
+    "WC_irrigation",
+]
+STATIC_DW_BANDS = [f"{x}_static" for x in DW_BANDS]
+STATIC_WC_BANDS = [f"{x}_static" for x in WC_BANDS]
+
+LANDSCAN_BANDS = ["b1"]
+LOCATION_BANDS = ["x", "y", "z"]
+
+SPACE_TIME_BANDS = S1_BANDS + S2_BANDS + ["NDVI"]
+TIME_BANDS = ERA5_BANDS + TC_BANDS + VIIRS_BANDS
+SPACE_BANDS = SRTM_BANDS + DW_BANDS + WC_BANDS
+STATIC_BANDS = LANDSCAN_BANDS + LOCATION_BANDS + STATIC_DW_BANDS + STATIC_WC_BANDS
+
+
+SPACE_TIME_BANDS_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+    {
+        "S1": [SPACE_TIME_BANDS.index(b) for b in S1_BANDS],
+        "S2_RGB": [SPACE_TIME_BANDS.index(b) for b in ["B2", "B3", "B4"]],
+        "S2_Red_Edge": [SPACE_TIME_BANDS.index(b) for b in ["B5", "B6", "B7"]],
+        "S2_NIR_10m": [SPACE_TIME_BANDS.index(b) for b in ["B8"]],
+        "S2_NIR_20m": [SPACE_TIME_BANDS.index(b) for b in ["B8A"]],
+        "S2_SWIR": [SPACE_TIME_BANDS.index(b) for b in ["B11", "B12"]],
+        "NDVI": [SPACE_TIME_BANDS.index("NDVI")],
+    }
 )
-from .data.config import CONFIG_FILENAME, ENCODER_FILENAME
-from .data.dataset import SPACE_BANDS, SPACE_TIME_BANDS, STATIC_BANDS, TIME_BANDS
-from .data.earthengine.s1 import S1_BANDS
-from .data.earthengine.s2 import S2_BANDS
-from .embeddings import (
-    get_1d_sincos_pos_embed_from_grid_torch,
-    get_2d_sincos_pos_embed_with_resolution,
-    get_month_encoding_table,
+
+TIME_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+    {
+        "ERA5": [TIME_BANDS.index(b) for b in ERA5_BANDS],
+        "TC": [TIME_BANDS.index(b) for b in TC_BANDS],
+        "VIIRS": [TIME_BANDS.index(b) for b in VIIRS_BANDS],
+    }
 )
-from .utils import device
+
+SPACE_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+    {
+        "SRTM": [SPACE_BANDS.index(b) for b in SRTM_BANDS],
+        "DW": [SPACE_BANDS.index(b) for b in DW_BANDS],
+        "WC": [SPACE_BANDS.index(b) for b in WC_BANDS],
+    }
+)
+
+STATIC_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+    {
+        "LS": [STATIC_BANDS.index(b) for b in LANDSCAN_BANDS],
+        "location": [STATIC_BANDS.index(b) for b in LOCATION_BANDS],
+        "DW_static": [STATIC_BANDS.index(b) for b in STATIC_DW_BANDS],
+        "WC_static": [STATIC_BANDS.index(b) for b in STATIC_WC_BANDS],
+    }
+)
+
+
+def get_2d_sincos_pos_embed_with_resolution(
+    embed_dim, grid_size, res, cls_token=False, device="cpu"
+):
+    """
+    grid_size: int of the grid height and width
+    res: array of size n, representing the resolution of a pixel (say, in meters),
+    return:
+    pos_embed: [n,grid_size*grid_size, embed_dim] or [n,1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
+    """
+    res = res.to(device)
+    grid_h = torch.arange(grid_size, device=device)
+    grid_w = torch.arange(grid_size, device=device)
+    grid = torch.meshgrid(
+        grid_w, grid_h, indexing="xy"
+    )  # here h goes first,direction reversed for numpy
+    grid = torch.stack(grid, dim=0)  # 2 x h x w
+
+    # grid = grid.reshape([2, 1, grid_size, grid_size])
+    grid = torch.einsum("chw,n->cnhw", grid, res)  # 2 x n x h x w
+    _, n, h, w = grid.shape
+    pos_embed = get_2d_sincos_pos_embed_from_grid_torch(embed_dim, grid)  #  # (nxH*W, D/2)
+    pos_embed = pos_embed.reshape(n, h * w, embed_dim)
+    if cls_token:
+        pos_embed = torch.cat(
+            [
+                torch.zeros([n, 1, embed_dim], device=pos_embed.device),
+                pos_embed,
+            ],
+            dim=1,
+        )
+    return pos_embed
+
+
+def get_2d_sincos_pos_embed_from_grid_torch(embed_dim, grid):
+    assert embed_dim % 2 == 0
+
+    # use half of dimensions to encode grid_h
+    emb_h = get_1d_sincos_pos_embed_from_grid_torch(embed_dim // 2, grid[0])  # (H*W, D/2)
+    emb_w = get_1d_sincos_pos_embed_from_grid_torch(embed_dim // 2, grid[1])  # (H*W, D/2)
+
+    emb = torch.cat([emb_h, emb_w], dim=1)  # (H*W, D)
+    return emb
+
+
+def get_1d_sincos_pos_embed_from_grid_torch(embed_dim, pos):
+    """
+    embed_dim: output dimension for each position
+    pos: a list of positions to be encoded: size (M,)
+    out: (M, D)
+    """
+    assert embed_dim % 2 == 0
+    omega = torch.arange(embed_dim // 2, device=pos.device) / embed_dim / 2.0
+    omega = 1.0 / 10000**omega  # (D/2,)
+
+    pos = pos.reshape(-1)  # (M,)
+    out = torch.einsum("m,d->md", pos, omega)  # (M, D/2), outer product
+
+    emb_sin = torch.sin(out)  # (M, D/2)
+    emb_cos = torch.cos(out)  # (M, D/2)
+
+    emb = torch.cat([emb_sin, emb_cos], dim=1)  # (M, D)
+    return emb
+
+
+def get_month_encoding_table(embed_dim):
+    """Sinusoid month encoding table, for 12 months indexed from 0-11"""
+    assert embed_dim % 2 == 0
+    angles = torch.arange(0, 13) / (12 / (2 * np.pi))
+
+    sin_table = torch.sin(torch.stack([angles for _ in range(embed_dim // 2)], axis=-1))
+    cos_table = torch.cos(torch.stack([angles for _ in range(embed_dim // 2)], axis=-1))
+    month_table = torch.concatenate([sin_table[:-1], cos_table[:-1]], axis=-1)
+
+    return month_table  # (M, D)
 
 
 def adjust_learning_rate(
@@ -1000,7 +1150,7 @@ class Encoder(GalileoBase):
         )
 
     @classmethod
-    def load_from_folder(cls, folder: Path):
+    def load_from_folder(cls, folder: Path, device: torch.device):
         if not (folder / CONFIG_FILENAME).exists():
             all_files_in_folder = [f.name for f in folder.glob("*")]
             raise ValueError(
@@ -1240,177 +1390,3 @@ class Decoder(GalileoBase):
             torch.stack(output_t, dim=-2),
             torch.stack(output_st, dim=-2),
         )
-
-
-class GalileoWrapper(nn.Module):
-    # we assume any data passed to this wrapper
-    # will contain S2 data with the following channels
-    S2_BAND_ORDERING = [
-        "B1",
-        "B2",
-        "B3",
-        "B4",
-        "B5",
-        "B6",
-        "B7",
-        "B8",
-        "B8A",
-        "B9",
-        "B10",
-        "B11",
-        "B12",
-    ]
-    S1_BAND_ORDERING = [
-        "VV",
-        "VH",
-    ]
-
-    def __init__(
-        self,
-        pretrained_path: Path,
-        patch_size: int = 8,
-        month: int = 6,
-        do_pool: bool = True,
-        add_layernorm_on_exit: bool = True,
-    ):
-        super().__init__()
-        self.encoder = Encoder.load_from_folder(pretrained_path)
-        self.dim = self.encoder.embedding_size
-        self.patch_size = patch_size
-        self.grid_size: Optional[int] = None
-        self.do_pool = do_pool
-        self.month = month
-        self.kept_s2_band_idx = [i for i, v in enumerate(self.S2_BAND_ORDERING) if v in S2_BANDS]
-        self.kept_s1_band_idx = [i for i, v in enumerate(self.S1_BAND_ORDERING) if v in S1_BANDS]
-        kept_s2_band_names = [val for val in self.S2_BAND_ORDERING if val in S2_BANDS]
-        kept_s1_band_names = [val for val in self.S1_BAND_ORDERING if val in S1_BANDS]
-        self.to_galileo_s2_map = [SPACE_TIME_BANDS.index(val) for val in kept_s2_band_names]
-        self.to_galileo_s1_map = [SPACE_TIME_BANDS.index(val) for val in kept_s1_band_names]
-        self.s_t_channels_s2 = [
-            idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S2" in key
-        ]
-        self.s_t_channels_s1 = [
-            idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S1" in key
-        ]
-        self.add_layernorm_on_exit = add_layernorm_on_exit
-
-    def preproccess(
-        self,
-        s2: Optional[torch.Tensor] = None,
-        s1: Optional[torch.Tensor] = None,
-        months: Optional[torch.Tensor] = None,
-    ):
-        # images should have shape (b h w c) or (b h w t c)
-        # TODO: mask out imputed indices
-        if s2 is not None:
-            s_t_channels = self.s_t_channels_s2
-            data_dtype = s2.dtype
-            data_device = s2.device
-            if len(s2.shape) == 4:
-                b, h, w, c_s2 = s2.shape
-                t = 1
-            else:
-                assert len(s2.shape) == 5
-                b, h, w, t, c_s2 = s2.shape
-            assert c_s2 == len(self.S2_BAND_ORDERING)
-
-            # add a single timestep
-            s_t_x = torch.zeros(
-                (b, h, w, t, len(SPACE_TIME_BANDS)), dtype=s2.dtype, device=s2.device
-            )
-            if len(s2.shape) == 4:
-                s_t_x[:, :, :, 0, self.to_galileo_s2_map] = s2[:, :, :, self.kept_s2_band_idx]
-            else:
-                s_t_x[:, :, :, :, self.to_galileo_s2_map] = s2[:, :, :, :, self.kept_s2_band_idx]
-
-        elif s1 is not None:
-            s_t_channels = self.s_t_channels_s1
-            data_dtype = s1.dtype
-            data_device = s1.device
-            if len(s1.shape) == 4:
-                b, h, w, c_s1 = s1.shape
-                t = 1
-            else:
-                assert len(s1.shape) == 5
-                b, h, w, t, c_s1 = s1.shape
-            assert c_s1 == len(self.S1_BAND_ORDERING)
-
-            # add a single timestep
-            s_t_x = torch.zeros(
-                (b, h, w, t, len(SPACE_TIME_BANDS)), dtype=s1.dtype, device=s1.device
-            )
-            if len(s1.shape) == 4:
-                s_t_x[:, :, :, 0, self.to_galileo_s1_map] = s1[:, :, :, self.kept_s1_band_idx]
-            else:
-                s_t_x[:, :, :, :, self.to_galileo_s1_map] = s1[:, :, :, :, self.kept_s1_band_idx]
-
-        else:
-            raise ValueError("no s1 or s2?")
-
-        s_t_m = torch.ones(
-            (b, h, w, t, len(SPACE_TIME_BANDS_GROUPS_IDX)),
-            dtype=data_dtype,
-            device=data_device,
-        )
-        s_t_m[:, :, :, :, s_t_channels] = 0
-
-        if months is None:
-            months = torch.ones((b, t), dtype=data_dtype, device=data_device) * self.month
-        else:
-            assert months.shape[-1] == t
-
-        self.grid_size = int(s_t_x.shape[1] / self.patch_size)
-
-        return (
-            s_t_x,
-            torch.empty((b, h, w, len(SPACE_BANDS)), dtype=data_dtype, device=data_device),
-            torch.empty((b, t, len(TIME_BANDS)), dtype=data_dtype, device=data_device),
-            torch.empty((b, len(STATIC_BANDS)), dtype=data_dtype, device=data_device),
-            s_t_m,
-            torch.ones(
-                (b, h, w, len(SPACE_BAND_GROUPS_IDX)), dtype=data_dtype, device=data_device
-            ),
-            torch.ones((b, t, len(TIME_BAND_GROUPS_IDX)), dtype=data_dtype, device=data_device),
-            torch.ones((b, len(STATIC_BAND_GROUPS_IDX)), dtype=data_dtype, device=data_device),
-            months.long(),
-        )
-
-    def forward(
-        self,
-        s2: Optional[torch.Tensor] = None,
-        s1: Optional[torch.Tensor] = None,
-        months: Optional[torch.Tensor] = None,
-    ):
-        if s1 is not None:
-            s_t_channels = self.s_t_channels_s1
-        elif s2 is not None:
-            s_t_channels = self.s_t_channels_s2
-        else:
-            raise ValueError("s1 and s2 both None?")
-
-        s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m, month = self.preproccess(
-            s2=s2, s1=s1, months=months
-        )
-        output = self.encoder(
-            s_t_x,
-            sp_x,
-            t_x,
-            st_x,
-            s_t_m,
-            sp_m,
-            t_m,
-            st_m,
-            month,
-            patch_size=self.patch_size,
-            add_layernorm_on_exit=self.add_layernorm_on_exit,
-        )
-        s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m, _ = output
-        if self.do_pool:
-            return self.encoder.average_tokens(s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m)
-        else:
-            # we will be assuming we only want s_t_x, and (for now) that we want all s_2 bands
-            # s_t_x has shape [b, h, w, t, c_g, d]
-            # and we want [b, h * w, d]
-            return rearrange(
-                s_t_x[:, :, :, :, s_t_channels, :].mean(dim=3), "b h w c_g d -> b (h w) c_g d"
-            ).mean(dim=2)

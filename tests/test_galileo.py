@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from einops import repeat
 
+from single_file_galileo import Encoder as SingleFileEncoder
 from src.data import (
     SPACE_BAND_GROUPS_IDX,
     SPACE_TIME_BANDS_GROUPS_IDX,
@@ -25,7 +26,8 @@ from src.masking import (
 )
 from src.utils import device, load_check_config
 
-DATA_FOLDER = Path(__file__).parents[1] / "data/tifs"
+DATA_FOLDER = Path(__file__).parents[1] / "data"
+TIFS_FOLDER = DATA_FOLDER / "tifs"
 TEST_MODEL_FOLDER = Path(__file__).parents[0] / "141"
 
 
@@ -55,7 +57,7 @@ class TestGalileo(unittest.TestCase):
             decoder_embedding_size=embedding_size,
             num_heads=1,
         )
-        ds = Dataset(DATA_FOLDER, False)
+        ds = Dataset(TIFS_FOLDER, False)
         for i in range(len(ds)):
             s_t_x, sp_x, t_x, st_x, months = self.to_tensor_with_batch_d(ds[i])
             masked_output = batch_subset_mask_galileo(
@@ -377,7 +379,7 @@ class TestGalileo(unittest.TestCase):
         patch_size = 4
         ratio = 0.25
 
-        ds = Dataset(DATA_FOLDER, False)
+        ds = Dataset(TIFS_FOLDER, False)
         tensor_batch = self.to_tensor_with_batch_d(ds[0])
         self.assertTrue(tensor_batch[0].shape[1] == tensor_batch[0].shape[2])
         for f in [batch_mask_time, batch_mask_space]:
@@ -427,7 +429,7 @@ class TestGalileo(unittest.TestCase):
         num_timesteps = 3
         encoder = Encoder(embedding_size=embedding_size, num_heads=1, depth=12)
         encoder.eval()
-        ds = Dataset(DATA_FOLDER, False)
+        ds = Dataset(TIFS_FOLDER, False)
         for i in range(len(ds)):
             s_t_x, sp_x, t_x, st_x, months = self.to_tensor_with_batch_d(ds[i])
             masked_output = batch_subset_mask_galileo(
@@ -510,3 +512,12 @@ class TestGalileo(unittest.TestCase):
 
             # st_x
             self.assertTrue(torch.equal(encoder_output_depth_varied[3], encoder_output_depth[3]))
+
+    def test_single_file_galileo_matches_galileo(self):
+        org_model = Encoder.load_from_folder(DATA_FOLDER / "models/nano")
+        sf_model = SingleFileEncoder.load_from_folder(
+            DATA_FOLDER / "models/nano", device=torch.device("cpu")
+        )
+
+        for model_p, sf_model_p in zip(org_model.parameters(), sf_model.parameters()):
+            self.assertTrue(torch.equal(model_p, sf_model_p))
