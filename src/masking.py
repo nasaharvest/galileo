@@ -121,15 +121,15 @@ class MaskedOutput(NamedTuple):
     2: not seen by the encoder, and processed by the decoder (the decoder's query values)
     """
 
-    space_time_x: torch.Tensor
-    space_x: torch.Tensor
-    time_x: torch.Tensor
-    static_x: torch.Tensor
-    space_time_mask: torch.Tensor
-    space_mask: torch.Tensor
-    time_mask: torch.Tensor
-    static_mask: torch.Tensor
-    months: torch.Tensor
+    space_time_x: torch.Tensor  # [B, H, W, T, len(SPACE_TIME_BANDS)]
+    space_x: torch.Tensor  # [B, H, W, len(SPACE_BANDS)]
+    time_x: torch.Tensor  # [B, T, len(TIME_BANDS)]
+    static_x: torch.Tensor  # [B, len(STATIC_BANDS)]
+    space_time_mask: torch.Tensor  # [B, H, W, T, len(SPACE_TIME_BANDS_GROUPS_IDX)]
+    space_mask: torch.Tensor  # [B, H, W, len(SPACE_BAND_GROUPS_IDX)]
+    time_mask: torch.Tensor  # [B, T, len(TIME_BAND_GROUPS_IDX)]
+    static_mask: torch.Tensor  # [B, len(STATIC_BAND_GROUPS_IDX)]
+    months: torch.Tensor  # [B, T]
 
 
 def weighted_sample_without_replacement(population, weights, k, rng=random):
