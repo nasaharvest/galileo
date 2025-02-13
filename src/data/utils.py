@@ -152,10 +152,10 @@ def construct_galileo_input(
 
     if normalize:
         normalizer = Normalizer(std=False)
-        s_t_x = normalizer(s_t_x)
-        sp_x = normalizer(sp_x)
-        t_x = normalizer(t_x)
-        st_x = normalizer(st_x)
+        s_t_x = torch.from_numpy(normalizer(s_t_x.cpu().numpy())).to(device)
+        sp_x = torch.from_numpy(normalizer(sp_x.cpu().numpy())).to(device)
+        t_x = torch.from_numpy(normalizer(t_x.cpu().numpy())).to(device)
+        st_x = torch.from_numpy(normalizer(st_x.cpu().numpy())).to(device)
 
     return MaskedOutput(
         space_time_x=s_t_x,
