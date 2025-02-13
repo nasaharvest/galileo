@@ -141,7 +141,7 @@ class Normalizer:
                 "div": deepcopy(STATIC_DIV_VALUES),
             },
         }
-
+        print(self.shift_div_dict.keys())
         self.normalizing_dicts = normalizing_dicts
         if std:
             name_to_bands = {

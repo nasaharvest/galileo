@@ -8,7 +8,14 @@ from src.data import (
     STATIC_BAND_GROUPS_IDX,
     TIME_BAND_GROUPS_IDX,
 )
-from src.data.dataset import to_cartesian
+from src.data.dataset import (
+    SPACE_BANDS,
+    SPACE_TIME_BANDS,
+    STATIC_BANDS,
+    TIME_BANDS,
+    Normalizer,
+    to_cartesian,
+)
 from src.data.earthengine.eo import (
     DW_BANDS,
     ERA5_BANDS,
@@ -16,12 +23,8 @@ from src.data.earthengine.eo import (
     LOCATION_BANDS,
     S1_BANDS,
     S2_BANDS,
-    SPACE_BANDS,
-    SPACE_TIME_BANDS,
     SRTM_BANDS,
-    STATIC_BANDS,
     TC_BANDS,
-    TIME_BANDS,
     VIIRS_BANDS,
     WC_BANDS,
 )
@@ -42,6 +45,7 @@ def construct_galileo_input(
     landscan: torch.Tensor | None = None,  # [D]
     latlon: torch.Tensor | None = None,  # [D]
     months: torch.Tensor | None = None,  # [T]
+    normalize: bool = False,
 ):
     space_time_inputs = [s1, s2]
     time_inputs = [era5, tc, viirs]
@@ -97,7 +101,7 @@ def construct_galileo_input(
     t_x = torch.zeros((t, len(TIME_BANDS)), dtype=torch.float, device=device)
     t_m = torch.ones((t, len(TIME_BAND_GROUPS_IDX)), dtype=torch.float, device=device)
     st_x = torch.zeros((len(STATIC_BANDS)), dtype=torch.float, device=device)
-    st_m = torch.ones((len(TIME_BAND_GROUPS_IDX)), dtype=torch.float, device=device)
+    st_m = torch.ones((len(STATIC_BAND_GROUPS_IDX)), dtype=torch.float, device=device)
 
     for x, bands_list, group_key in zip([s1, s2], [S1_BANDS, S2_BANDS], ["S1", "S2"]):
         if x is not None:
@@ -145,6 +149,13 @@ def construct_galileo_input(
     else:
         if months.shape[0] != t:
             raise ValueError("Incorrect number of input months")
+
+    if normalize:
+        normalizer = Normalizer(std=False)
+        s_t_x = normalizer(s_t_x)
+        sp_x = normalizer(sp_x)
+        t_x = normalizer(t_x)
+        st_x = normalizer(st_x)
 
     return MaskedOutput(
         space_time_x=s_t_x,
