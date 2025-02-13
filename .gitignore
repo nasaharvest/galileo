@@ -1,0 +1,21 @@
+__pycache__
+# data needs to be explicitly added
+data/*
+.ipynb_checkpoints
+baseline_weights
+models
+slurm
+sb.sh
+venv
+wandb
+*.DS_Store
+**/*.gstmp
+*.npy
+# Ignore generated credentials from google-github-actions/auth
+gha-creds-*.json
+# images need to be explicitly added
+*.png
+.idea
+.vscode
+scrap
+imgs
