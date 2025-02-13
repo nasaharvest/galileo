@@ -4,7 +4,7 @@ Learning Global and Local Features in Pretrained Remote Sensing Models
 
 <img src="diagrams/figure2.png" alt="Galileo_diagram" height="300px"/>
 
-Galileo is a family of pretrained remote sensing models. These models have been pretrained on a diversity of remote sensing inputs, and perform well on a range of benchmark tasks. For more information, please see our paper.
+Galileo is a family of pretrained remote sensing models. These models have been pretrained on a diversity of remote sensing inputs, and perform well on a range of benchmark tasks. For more information, please see our [paper](galileo.pdf).
 
 ### Using Galileo
 
@@ -60,3 +60,5 @@ masked_output = construct_galileo_input(s2=s2, normalize=normalize)
 
 ### Model weights
 The nano model weights are available [on github](data/models/nano).
+
+Other model sizes (including nano) are available [on huggingface](https://huggingface.co/nasaharvest/galileo).
