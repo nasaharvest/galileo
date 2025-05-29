@@ -2,7 +2,7 @@
 
 Learning Global and Local Features in Pretrained Remote Sensing Models
 
-<img src="diagrams/figure2.png" alt="Galileo_diagram" height="300px"/>
+<img src="diagrams/inference.png" alt="Galileo_diagram" height="300px"/>
 
 Galileo is a family of pretrained remote sensing models. These models have been pretrained on a diversity of remote sensing inputs, and perform well on a range of benchmark tasks. For more information, please see our [paper](https://arxiv.org/abs/2502.09356).
 
