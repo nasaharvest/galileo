@@ -7,7 +7,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from random import sample
-from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union, cast
+from typing import Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple, Union, cast
 from typing import OrderedDict as OrderedDictType
 
 import h5py
@@ -203,6 +203,46 @@ class DatasetOutput(NamedTuple):
             normalizer(self.static_x).astype(np.half),
             self.months,
         )
+
+    def in_pixel_batches(self, batch_size: int, window_size: int) -> Iterator["DatasetOutput"]:
+        if self.space_time_x.shape[0] % window_size != 0:
+            raise ValueError("DatasetOutput height must be divisible by the patch size")
+        if self.space_time_x.shape[1] % window_size != 0:
+            raise ValueError("DatasetOutput width must be divisible by the patch size")
+
+        # how many batches from the height dimension, how many from the width dimension?
+        h_b = self.space_time_x.shape[0] // window_size
+        w_b = self.space_time_x.shape[1] // window_size
+        flat_s_t_x = rearrange(
+            self.space_time_x,
+            "(h_b h) (w_b w) t d -> (h_b w_b) h w t d",
+            h=window_size,
+            w=window_size,
+            h_b=h_b,
+            w_b=w_b,
+        )
+        flat_sp_x = rearrange(
+            self.space_x,
+            "(h_b h) (w_b w) d -> (h_b w_b) h w d",
+            h=window_size,
+            w=window_size,
+            h_b=h_b,
+            w_b=w_b,
+        )
+
+        # static in space modalities will just get repeated per batch
+        cur_idx = 0
+        while cur_idx < flat_s_t_x.shape[0]:
+            cur_idx_s_t_x = flat_s_t_x[cur_idx : cur_idx + batch_size].copy()
+            b = cur_idx_s_t_x.shape[0]
+            yield DatasetOutput(
+                space_time_x=cur_idx_s_t_x,
+                space_x=flat_sp_x[cur_idx : cur_idx + batch_size].copy(),
+                time_x=repeat(self.time_x, "t d -> b t d", b=b),
+                static_x=repeat(self.static_x, "d -> b d", b=b),
+                months=repeat(self.months, "t -> b t", b=b),
+            )
+            cur_idx += batch_size
 
 
 class ListOfDatasetOutputs(NamedTuple):
@@ -470,26 +510,28 @@ class Dataset(PyTorchDataset):
         tif_name = tif_path.stem
         return self.h5py_folder / f"{tif_name}.h5"
 
-    @classmethod
-    def start_month_from_file(cls, tif_path: Path) -> int:
+    @staticmethod
+    def start_month_from_file(tif_path: Path) -> int:
         start_date = tif_path.name.partition("dates=")[2][:10]
         start_month = int(start_date.split("-")[1])
         return start_month
 
-    def month_array_from_file(self, tif_path: Path, num_timesteps: int) -> np.ndarray:
+    @classmethod
+    def month_array_from_file(cls, tif_path: Path, num_timesteps: int) -> np.ndarray:
         """
         Given a filepath and num_timesteps, extract start_month and return an array of
         months where months[idx] is the month for list(range(num_timesteps))[i]
         """
         # assumes all files are exported with filenames including:
         # *dates=<start_date>*, where the start_date is in a YYYY-MM-dd format
-        start_month = self.start_month_from_file(tif_path)
+        start_month = cls.start_month_from_file(tif_path)
         # >>> np.fmod(np.array([9., 10, 11, 12, 13, 14]), 12)
         # array([ 9., 10., 11.,  0.,  1.,  2.])
         # - 1 because we want to index from 0
         return np.fmod(np.arange(start_month - 1, start_month - 1 + num_timesteps), 12)
 
-    def _tif_to_array(self, tif_path: Path) -> DatasetOutput:
+    @classmethod
+    def _tif_to_array(cls, tif_path: Path) -> DatasetOutput:
         with cast(xr.Dataset, rioxarray.open_rasterio(tif_path)) as data:
             # [all_combined_bands, H, W]
             # all_combined_bands includes all dynamic-in-time bands
@@ -514,11 +556,11 @@ class Dataset(PyTorchDataset):
             c=len(ALL_DYNAMIC_IN_TIME_BANDS),
             t=int(num_timesteps),
         )
-        dynamic_in_time_x = self._fillna(dynamic_in_time_x, EO_DYNAMIC_IN_TIME_BANDS_NP)
+        dynamic_in_time_x = cls._fillna(dynamic_in_time_x, EO_DYNAMIC_IN_TIME_BANDS_NP)
         space_time_x = dynamic_in_time_x[:, :, :, : -len(TIME_BANDS)]
 
         # calculate indices, which have shape [h, w, t, 1]
-        ndvi = self.calculate_ndi(space_time_x, band_1="B8", band_2="B4")
+        ndvi = cls.calculate_ndi(space_time_x, band_1="B8", band_2="B4")
 
         space_time_x = np.concatenate((space_time_x, ndvi), axis=-1)
 
@@ -529,7 +571,7 @@ class Dataset(PyTorchDataset):
             values[-(len(SPACE_BANDS) + static_bands_in_tif) : -static_bands_in_tif],
             "c h w -> h w c",
         )
-        space_x = self._fillna(space_x, np.array(SPACE_BANDS))
+        space_x = cls._fillna(space_x, np.array(SPACE_BANDS))
 
         static_x = values[-static_bands_in_tif:]
         # add DW_STATIC and WC_STATIC
@@ -543,9 +585,9 @@ class Dataset(PyTorchDataset):
                 np.nanmean(wc_bands, axis=(0, 1)),
             ]
         )
-        static_x = self._fillna(static_x, np.array(STATIC_BANDS))
+        static_x = cls._fillna(static_x, np.array(STATIC_BANDS))
 
-        months = self.month_array_from_file(tif_path, int(num_timesteps))
+        months = cls.month_array_from_file(tif_path, int(num_timesteps))
 
         try:
             assert not np.isnan(space_time_x).any(), f"NaNs in s_t_x for {tif_path}"
