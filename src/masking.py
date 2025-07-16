@@ -13,6 +13,7 @@ from .data.dataset import (
     SPACE_TIME_BANDS_GROUPS_IDX,
     STATIC_BAND_GROUPS_IDX,
     TIME_BAND_GROUPS_IDX,
+    DatasetOutput,
 )
 from .data_augmentation import Augmentation
 
@@ -130,6 +131,32 @@ class MaskedOutput(NamedTuple):
     time_mask: torch.Tensor  # [B, T, len(TIME_BAND_GROUPS_IDX)]
     static_mask: torch.Tensor  # [B, len(STATIC_BAND_GROUPS_IDX)]
     months: torch.Tensor  # [B, T]
+
+    @classmethod
+    def from_datasetoutput(
+        cls, dataset_output: DatasetOutput, device: torch.device
+    ) -> "MaskedOutput":
+        """Construct a masked outout with all 0 masks (i.e. everything unmasked)."""
+        b, h, w, t, _ = dataset_output.space_time_x.shape
+        return cls(
+            space_time_x=torch.tensor(dataset_output.space_time_x).to(device=device),
+            space_x=torch.tensor(dataset_output.space_x).to(device=device),
+            time_x=torch.tensor(dataset_output.time_x).to(device=device),
+            static_x=torch.tensor(dataset_output.static_x).to(device=device),
+            months=torch.tensor(dataset_output.months).to(device=device),
+            space_time_mask=torch.zeros(
+                (b, h, w, t, len(SPACE_TIME_BANDS_GROUPS_IDX)), dtype=torch.float, device=device
+            ),
+            space_mask=torch.zeros(
+                (b, h, w, len(SPACE_BAND_GROUPS_IDX)), dtype=torch.float, device=device
+            ),
+            time_mask=torch.zeros(
+                (b, t, len(TIME_BAND_GROUPS_IDX)), dtype=torch.float, device=device
+            ),
+            static_mask=torch.zeros(
+                (b, len(STATIC_BAND_GROUPS_IDX)), dtype=torch.float, device=device
+            ),
+        )
 
 
 def weighted_sample_without_replacement(population, weights, k, rng=random):
