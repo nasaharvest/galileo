@@ -58,6 +58,8 @@ s2 = torch.randn((t, h, w, len(S2_BANDS)))
 masked_output = construct_galileo_input(s2=s2, normalize=normalize)
 ```
 
+If you want to see Galileo being used on real data, we also have a [notebook](visualizing_embeddings.ipynb) which generates embeddings for a real training tif file.
+
 ### Model weights
 The nano model weights are available [on github](data/models/nano).
 
