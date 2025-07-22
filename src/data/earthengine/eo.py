@@ -270,7 +270,7 @@ class EarthEngineExporter:
     script:
     ```
     from src.data import EarthEngineExporter
-    EarthEngineExporter(dest_bucket="bucket_name").export_for_labels(df)
+    EarthEngineExporter(dest_bucket="bucket_name").export_for_latlons(df)
     ```
     :param check_ee: Whether to check Earth Engine before exporting
     :param check_gcp: Whether to check Google Cloud Storage before exporting,
