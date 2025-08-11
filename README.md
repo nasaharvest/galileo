@@ -65,6 +65,12 @@ The nano model weights are available [on github](data/models/nano).
 
 Other model sizes (including nano) are available [on huggingface](https://huggingface.co/nasaharvest/galileo).
 
+You can download them locally with the following command (you will need to install the `huggingface_hub[cli]` package first):
+
+```bash
+hf download nasaharvest/galileo --include "models/**" --local-dir data
+```
+
 
 ### Reference
 
