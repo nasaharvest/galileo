@@ -966,7 +966,7 @@ class Encoder(GalileoBase):
         )
 
         if (exit_after is None) or (exit_after > 0):
-            s_t_x, sp_x, t_x, st_x, s_t_m, st_m, t_m, st_m = self.apply_attn(
+            s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m = self.apply_attn(
                 s_t_x,
                 sp_x,
                 t_x,
