@@ -51,4 +51,4 @@ RUN mkdir /model/galileo/data/models/tiny \
 ENV PYTHONPATH="${PYTHONPATH}:/model/galileo:/model"
 
 # Entry point
-CMD ["jupyter-lab", "--ip", "0.0.0.0", "--port", "8888", "--allow-root"]
+CMD ["bash"]
