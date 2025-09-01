@@ -73,6 +73,49 @@ You can download them locally with the following command (you will need to insta
 hf download nasaharvest/galileo --include "models/**" --local-dir data
 ```
 
+#### Docker setup
+
+A `Dockerfile` is available to build a container that includes all
+dependencies as well as the models, served in a JupyterLab environment. To
+build the image:
+
+- Download the [Dockerfile](Dockerfile) locally.
+- Change directory on the command line to the folder where you have downloaded
+  the file:
+
+  `cd /path/to/folder/with_Dockerfile`
+
+- Assuming you have [Docker](https://docker.com) (or a compatible app like
+  `podman`), run:
+
+  ```bash
+  docker build -t galileo .
+  ```
+
+Once completed, you can run the built image with:
+
+```bash
+docker run \
+	--rm \
+	-ti \
+	--gpus all \
+	galileo
+```
+
+Notes:
+
+- The command above will use GPUs available on the host system, but requires
+  the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed and propertly working. If you do not have or do not want to use the GPU, you can drop the argument.
+- As stated above, the image runs fully isolated from the host. If you
+  want to connect the running container to a folder, you can use the
+  `--volume` argument and map a folder (see the official docs
+  [here](https://docker-docs.uclv.cu/storage/volumes/)). In that case, you
+  might have to run the container as root, which you can do by adding the
+  argument `--user root`. Similarly, if you want to launch `jupyter lab`
+  (included), you'll have to map the 8888 port with `--port`.
+- This image is built for x86 chips (e.g., Intel, AMD). Apple Silicon users
+  will need to add the following flag to their `docker build` and `docker run`
+  commands: `--platform linux/amd64`
 
 ### Reference
 
