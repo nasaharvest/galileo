@@ -522,6 +522,7 @@ class TestGalileo(unittest.TestCase):
             self.assertTrue(torch.equal(encoder_output_depth_varied[3], encoder_output_depth[3]))
 
     def test_single_file_galileo_matches_galileo(self):
+        # test copied from https://github.com/nasaharvest/galileo/issues/15#issuecomment-3286397218
         org_model = Encoder.load_from_folder(DATA_FOLDER / "models/nano")
         sf_model = SingleFileEncoder.load_from_folder(
             DATA_FOLDER / "models/nano", device=torch.device("cpu")
