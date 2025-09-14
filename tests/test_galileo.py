@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import torch
 from einops import repeat
 
@@ -16,7 +17,14 @@ from src.data import (
 )
 from src.data.config import CONFIG_FILENAME, ENCODER_FILENAME
 from src.data.dataset import DatasetOutput
-from src.galileo import Decoder, Encoder
+from src.galileo import (
+    SPACE_BANDS,
+    SPACE_TIME_BANDS,
+    STATIC_BANDS,
+    TIME_BANDS,
+    Decoder,
+    Encoder,
+)
 from src.masking import (
     MASKING_MODES,
     MaskingFunctions,
@@ -514,6 +522,7 @@ class TestGalileo(unittest.TestCase):
             self.assertTrue(torch.equal(encoder_output_depth_varied[3], encoder_output_depth[3]))
 
     def test_single_file_galileo_matches_galileo(self):
+        # test copied from https://github.com/nasaharvest/galileo/issues/15#issuecomment-3286397218
         org_model = Encoder.load_from_folder(DATA_FOLDER / "models/nano")
         sf_model = SingleFileEncoder.load_from_folder(
             DATA_FOLDER / "models/nano", device=torch.device("cpu")
@@ -521,3 +530,48 @@ class TestGalileo(unittest.TestCase):
 
         for model_p, sf_model_p in zip(org_model.parameters(), sf_model.parameters()):
             self.assertTrue(torch.equal(model_p, sf_model_p))
+
+    def test_nans(self):
+        m = Encoder.load_from_folder(DATA_FOLDER / "models/nano")
+
+        B = 2
+        H = 1
+        W = 1
+        T = 5
+
+        s_t_x = torch.randn(B, H, W, T, len(SPACE_TIME_BANDS))
+        sp_x = torch.randn(B, H, W, len(SPACE_BANDS))
+        t_x = torch.randn(B, T, len(TIME_BANDS))
+        st_x = torch.randn(B, len(STATIC_BANDS))
+        s_t_m = torch.ones(B, H, W, T, len(SPACE_TIME_BANDS_GROUPS_IDX))
+        sp_m = torch.ones(B, H, W, len(SPACE_BAND_GROUPS_IDX))
+        t_m = torch.ones(B, T, len(TIME_BAND_GROUPS_IDX))
+        st_m = torch.ones(B, len(STATIC_BAND_GROUPS_IDX))
+        months = torch.ones(B, T, dtype=torch.int)
+
+        # Half of the samples have a sequence length of 3
+        s_t_m[:1, :, :, 0:3, :2] = 0
+        # Other half of the samples have a sequence length of 4
+        s_t_m[1:, :, :, 0:4, :2] = 0
+        for r in range(100):
+            # Allocate some random amount of memory and set it to inf
+            # making it more likely that inf values will end up in memory returned by 'torch.empty'
+            N = np.random.randint(1, 10) * B * H * W * T
+            _ = torch.full((N,), fill_value=torch.inf)
+            e = m(
+                s_t_x,
+                sp_x,
+                t_x,
+                st_x,
+                s_t_m,
+                sp_m,
+                t_m,
+                st_m,
+                months,
+                patch_size=1,
+                input_resolution_m=10,
+                add_layernorm_on_exit=False,
+            )
+            assert not m.average_tokens(*(e[:-1])).isnan().any()
+            assert not e[0][:1, :, :, 0:3, 0].isnan().any()
+            assert not e[0][1:, :, :, 0:4, 0].isnan().any()
