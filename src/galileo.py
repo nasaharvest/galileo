@@ -869,7 +869,6 @@ class Encoder(GalileoBase):
 
         # we don't care about the mask returned by add_removed_tokens, since we will
         # just use the original, unclipped mask here
-        print(x)
         x, _ = self.add_removed_tokens(x, indices, new_m)
         return (
             *self.split_and_expand_hwtc(x, h, w, t, s_t_c_g, sp_c_g, t_c_g, st_c_g),
