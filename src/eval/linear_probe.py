@@ -67,7 +67,7 @@ def train_and_eval_probe_seg(lr, config, loaders, in_features, grid_size, device
         num_classes=config["num_classes"],
         patch_size=output_patch_size,
         device=device,
-        probe_type=probe_type
+        probe_type=probe_type,
     )
     val_miou = evaluate_probe_seg(
         data_loader=loaders["valid"],

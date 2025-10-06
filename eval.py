@@ -416,7 +416,7 @@ if "cropharvest" not in benchmark_name:
                                 in_features=encoder.dim,
                                 grid_size=encoder.grid_size,
                                 device=device,
-                                probe_type="LP"
+                                probe_type="LP",
                             )
                         else:
                             raise ValueError(
