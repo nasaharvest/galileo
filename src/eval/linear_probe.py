@@ -57,7 +57,7 @@ def train_and_eval_probe_cls(lr, config, loaders, in_features, device):
     return val_acc, test_acc
 
 
-def train_and_eval_probe_seg(lr, config, loaders, in_features, grid_size, device):
+def train_and_eval_probe_seg(lr, config, loaders, in_features, grid_size, device, probe_type):
     output_patch_size = math.ceil(config["segmentation_map_height_width"] / grid_size)
     probe = train_probe_seg(
         data_loader=loaders["train"],
@@ -67,6 +67,7 @@ def train_and_eval_probe_seg(lr, config, loaders, in_features, grid_size, device
         num_classes=config["num_classes"],
         patch_size=output_patch_size,
         device=device,
+        probe_type=probe_type
     )
     val_miou = evaluate_probe_seg(
         data_loader=loaders["valid"],
