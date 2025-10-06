@@ -54,6 +54,7 @@ Alternatively, a [utility function](src/data/utils.py#L36) is provided to transf
 from src.data.utils import S2_BANDS, construct_galileo_input
 
 t, h, w = 2, 4, 4
+normalize = True
 s2 = torch.randn((t, h, w, len(S2_BANDS)))
 masked_output = construct_galileo_input(s2=s2, normalize=normalize)
 ```
