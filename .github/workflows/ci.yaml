@@ -15,18 +15,39 @@ jobs:
     steps:
     - name: Clone repo
       uses: actions/checkout@v3
+    
     - name: Set up python
       uses: actions/setup-python@v4
       with:
         python-version: 3.12
-        cache: 'pip'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+    
     - name: Install dependencies
-      run: pip install -r requirements-dev.txt
+      run: uv pip install --system -r requirements-dev.txt
+    
     - name: ruff linter
-      run: python -m  ruff check .
+      run: python -m ruff check .
+    
     - name: ruff formatter
       run: python -m ruff format --check .
+    
     - name: mypy
       run: python -m mypy .
-    - name: unit tests
-      run: python -m unittest discover -s tests
+    
+    - name: unit tests with coverage
+      run: |
+        python -m coverage run -m unittest discover -s tests
+        python -m coverage report -m
+        python -m coverage xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
