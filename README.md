@@ -118,6 +118,26 @@ Notes:
   will need to add the following flag to their `docker build` and `docker run`
   commands: `--platform linux/amd64`
 
+### Development
+
+**Setup:**
+```bash
+./setup_dev.sh  # Installs uv, dependencies, and pre-commit hooks
+```
+
+**Run tests with coverage:**
+```bash
+python -m coverage run -m unittest discover -s tests
+python -m coverage report -m
+```
+
+**Optional - Codecov setup:**
+1. Sign in at https://codecov.io with GitHub
+2. Add your repo and copy the upload token
+3. Add token to GitHub: Settings → Secrets → Actions → New secret
+   - Name: `CODECOV_TOKEN`
+   - Value: (paste token)
+
 ### Reference
 
 If you find this code useful, please cite the following paper:
