@@ -5,7 +5,7 @@ WORKDIR /model
 RUN micromamba install \
         --name base \
         --yes \
-        'python=3.12' \
+        'python<3.11' \
                 gcc \
                 gxx \
                 pip \
