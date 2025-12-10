@@ -1,0 +1,32 @@
+# Coverage.py configuration for Galileo project
+# See: https://coverage.readthedocs.io/en/latest/config.html
+
+[run]
+# Only measure coverage for source code (not tests or dependencies)
+source = src
+
+# Exclude files/directories that shouldn't be measured
+omit =
+    */tests/*           # Test files themselves don't need coverage
+    */venv/*            # Virtual environment packages
+    */anysat/*          # Third-party baseline model (not our code)
+    */__pycache__/*     # Python bytecode cache
+    */site-packages/*   # Installed packages
+
+[report]
+# Lines matching these patterns won't count as "uncovered"
+exclude_lines =
+    pragma: no cover              # Manual exclusion comment
+    def __repr__                  # String representation (usually trivial)
+    raise AssertionError          # Should never execute in normal flow
+    raise NotImplementedError     # Abstract method placeholders
+    if __name__ == .__main__.:    # Script entry points (not unit tested)
+    if TYPE_CHECKING:             # Type-only imports (never executed at runtime)
+    @abstractmethod               # Abstract methods (implemented in subclasses)
+    @abc.abstractmethod
+
+[html]
+# Output directory for HTML coverage reports
+# Run: python -m coverage html
+# Open: htmlcov/index.html
+directory = htmlcov

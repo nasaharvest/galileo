@@ -19,3 +19,8 @@ gha-creds-*.json
 .vscode
 scrap
 imgs
+
+# Coverage reports
+.coverage
+coverage.xml
+htmlcov/
