@@ -15,36 +15,40 @@ jobs:
     steps:
     - name: Clone repo
       uses: actions/checkout@v4
-    
+
     - name: Set up python
       uses: actions/setup-python@v5
       with:
         python-version: 3.12
-    
+
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v4
       with:
-        # Caching disabled until uv.lock is added (requires pyproject.toml migration)
-        enable-cache: false
-    
+        enable-cache: true
+
     - name: Install dependencies
-      run: uv pip install --system -r requirements-dev.txt
-    
+      run: |
+        uv lock
+        uv sync --extra dev
+
+    - name: Verify ruff installation
+      run: uv run ruff --version
+
     - name: ruff linter
-      run: python -m ruff check .
-    
+      run: uv run ruff check .
+
     - name: ruff formatter
-      run: python -m ruff format --check .
-    
+      run: uv run ruff format --check .
+
     - name: mypy
-      run: python -m mypy .
-    
+      run: uv run mypy .
+
     - name: unit tests with coverage
       run: |
-        python -m coverage run -m unittest discover -s tests
-        python -m coverage report -m
-        python -m coverage xml
-    
+        uv run coverage run -m unittest discover -s tests
+        uv run coverage report -m
+        uv run coverage xml
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
