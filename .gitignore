@@ -7,6 +7,8 @@ models
 slurm
 sb.sh
 venv
+.venv
+# uv.lock is committed for reproducible builds
 wandb
 *.DS_Store
 **/*.gstmp

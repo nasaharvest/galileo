@@ -10,7 +10,9 @@ updates:
       - "dependencies"
       - "github-actions"
 
-  # Python dependencies
+  # Python dependencies (via pyproject.toml)
+  # Note: Using pip ecosystem as dependabot doesn't support uv yet
+  # It will read from pyproject.toml and update dependencies there
   - package-ecosystem: "pip"
     directory: "/"
     schedule:

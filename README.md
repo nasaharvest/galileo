@@ -77,58 +77,54 @@ hf download nasaharvest/galileo --include "models/**" --local-dir data
 #### Docker setup
 
 A `Dockerfile` is available to build a container that includes all
-dependencies as well as the models, served in a JupyterLab environment. To
-build the image:
+dependencies as well as the models. To build the image:
 
-- Download the [Dockerfile](Dockerfile) locally.
-- Change directory on the command line to the folder where you have downloaded
-  the file:
-
-  `cd /path/to/folder/with_Dockerfile`
-
-- Assuming you have [Docker](https://docker.com) (or a compatible app like
-  `podman`), run:
-
-  ```bash
-  docker build -t galileo .
-  ```
+```bash
+docker build -t galileo .
+```
 
 Once completed, you can run the built image with:
 
 ```bash
-docker run \
-	--rm \
-	-ti \
-	--gpus all \
-	galileo
+# Interactive shell
+docker run --rm -ti galileo
+
+# Run training (with GPU)
+docker run --rm -ti --gpus all galileo uv run python train.py --config_file nano.json
+
+# Run without GPU
+docker run --rm -ti galileo uv run python train.py --config_file nano.json
 ```
 
-Notes:
-
-- The command above will use GPUs available on the host system, but requires
-  the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed and propertly working. If you do not have or do not want to use the GPU, you can drop the argument.
-- As stated above, the image runs fully isolated from the host. If you
-  want to connect the running container to a folder, you can use the
-  `--volume` argument and map a folder (see the official docs
-  [here](https://docker-docs.uclv.cu/storage/volumes/)). In that case, you
-  might have to run the container as root, which you can do by adding the
-  argument `--user root`. Similarly, if you want to launch `jupyter lab`
-  (included), you'll have to map the 8888 port with `--port`.
-- This image is built for x86 chips (e.g., Intel, AMD). Apple Silicon users
-  will need to add the following flag to their `docker build` and `docker run`
-  commands: `--platform linux/amd64`
+**Notes:**
+- GPU support requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- To mount local data: `docker run --rm -ti -v $(pwd)/data:/model/galileo/data galileo`
+- Apple Silicon users need: `--platform linux/amd64` flag for both build and run commands
 
 ### Development
 
 **Setup:**
 ```bash
-./setup_dev.sh  # Installs uv, dependencies, and pre-commit hooks
+# Option 1: Automated setup (installs uv if needed)
+./setup_dev.sh
+
+# Option 2: Manual setup with uv
+uv sync                    # Install all dependencies (includes dev by default)
+uv run pre-commit install  # Setup pre-commit hooks
 ```
 
 **Run tests with coverage:**
 ```bash
-python -m coverage run -m unittest discover -s tests
-python -m coverage report -m
+uv run coverage run -m unittest discover -s tests
+uv run coverage report -m
+```
+
+**Other common commands:**
+```bash
+uv run ruff check .                    # Lint code
+uv run ruff format .                   # Format code
+uv run mypy .                          # Type checking
+uv run pre-commit run --all-files      # Run all pre-commit checks
 ```
 
 **Optional - Codecov setup:**
