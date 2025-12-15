@@ -12,18 +12,18 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-# Install dependencies
-echo "Installing dependencies..."
-uv pip install --system -r requirements-dev.txt
+# Sync dependencies
+echo "Syncing dependencies with uv..."
+uv sync
 
 # Install pre-commit hooks
 echo "Installing pre-commit hooks..."
-pre-commit install
+uv run pre-commit install
 
 echo ""
 echo "✅ Setup complete!"
 echo ""
 echo "Pre-commit hooks are now installed and will run automatically on git commit."
-echo "To run checks manually: pre-commit run --all-files"
-echo "To run tests with coverage: python -m coverage run -m unittest discover -s tests"
+echo "To run checks manually: uv run pre-commit run --all-files"
+echo "To run tests with coverage: uv run coverage run -m unittest discover -s tests"
 echo ""

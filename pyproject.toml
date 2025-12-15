@@ -1,3 +1,69 @@
+[project]
+name = "galileo"
+version = "0.1.0"
+description = "Learning Global and Local Features in Pretrained Remote Sensing Models"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "Gabriel Tseng", email = "gabriel.tseng@mail.mcgill.ca" },
+    { name = "Anthony Fuller", email = "anthonydavidfuller@gmail.com" }
+]
+keywords = ["remote sensing", "earth observation", "deep learning", "pytorch", "foundation models"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "wandb==0.16.3",
+    "numpy==1.26.4",
+    "einops==0.7.0",
+    "torch==2.2.1",
+    "torchvision==0.17.1",
+    "earthengine-api==0.1.391",
+    "rioxarray==0.15.1",
+    "rasterio==1.3.10",
+    "tqdm==4.66.2",
+    "geopandas==0.14.3",
+    "fiona==1.9.6",
+    "geobench==1.0.0",
+    "h5py==3.10.0",
+    "scikit-learn==1.4.1.post1",
+    "types-requests",
+    "fast_pytorch_kmeans",
+    "satlaspretrain-models",
+    "timm",
+    "breizhcrops",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.2.0",
+    "mypy==1.8.0",
+    "coverage==7.4.0",
+    "pre-commit==3.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/nasaharvest/galileo"
+Repository = "https://github.com/nasaharvest/galileo"
+Documentation = "https://github.com/nasaharvest/galileo#readme"
+"Bug Tracker" = "https://github.com/nasaharvest/galileo/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
 [tool.ruff]
 # Enable the isort rules.
 lint.extend-select = ["I"]
