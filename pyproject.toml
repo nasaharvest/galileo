@@ -23,7 +23,7 @@ classifiers = [
 
 dependencies = [
     "wandb==0.16.3",
-    "numpy==1.26.4",
+    "numpy==2.2.6",
     "einops==0.7.0",
     "torch==2.2.1",
     "torchvision==0.17.1",
