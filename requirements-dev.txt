@@ -1,6 +1,6 @@
 -r requirements.txt
 ruff==0.2.0
 mypy==1.8.0
-matplotlib==3.8.3
+matplotlib==3.10.8
 coverage==7.4.0
 pre-commit==3.6.0
