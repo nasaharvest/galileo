@@ -59,7 +59,7 @@ s2 = torch.randn((t, h, w, len(S2_BANDS)))
 masked_output = construct_galileo_input(s2=s2, normalize=normalize)
 ```
 
-If you want to see Galileo being used on real data, we also have a [notebook](visualizing_embeddings.ipynb) which generates embeddings for a real training tif file:
+If you want to see Galileo being used on real data, we also have a [marimo app](visualizing_embeddings.py) which generates embeddings for a real training tif file:
 
 <img src="diagrams/model_outputs.png" alt="Galileo model outputs" height="300px"/>
 
@@ -125,6 +125,8 @@ uv run ruff check .                    # Lint code
 uv run ruff format .                   # Format code
 uv run mypy .                          # Type checking
 uv run pre-commit run --all-files      # Run all pre-commit checks
+uv run marimo run visualizing_embeddings.py  # Run marimo app for visualization
+uv run marimo edit visualizing_embeddings.py # Edit marimo app
 ```
 
 **Optional - Codecov setup:**
