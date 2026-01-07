@@ -1,7 +1,7 @@
 import marimo
 
-__generated_with = "0.9.30"
-app = marimo.App(width="medium")
+__generated_with = "0.18.4"
+app = marimo.App(width="medium", auto_download=["ipynb"])
 
 
 @app.cell
@@ -42,7 +42,7 @@ def imports():
     from tqdm import tqdm
 
     from src.data.config import DATA_FOLDER, NORMALIZATION_DICT_FILENAME
-    from src.data.dataset import Dataset, DatasetOutput, Normalizer
+    from src.data.dataset import Dataset, Normalizer
     from src.galileo import Encoder
     from src.masking import MaskedOutput
     from src.utils import config_dir
@@ -50,11 +50,9 @@ def imports():
     print("✅ SUCCESS: All libraries imported successfully!")
     print(f"📊 Using PyTorch version: {torch.__version__}")
     print(f"📊 Using NumPy version: {np.__version__}")
-
     return (
         DATA_FOLDER,
         Dataset,
-        DatasetOutput,
         Encoder,
         KMeans,
         MaskedOutput,
@@ -72,7 +70,13 @@ def imports():
 
 
 @app.cell
-def load_data(Dataset, NORMALIZATION_DICT_FILENAME, Normalizer, Path, config_dir):
+def load_data(
+    Dataset,
+    NORMALIZATION_DICT_FILENAME,
+    Normalizer,
+    Path,
+    config_dir,
+):
     """
     First, we'll load a dataset output using one of the example training tifs in `data/tifs`. We also normalize it using the same normalization stats we used during training.
     """
@@ -108,8 +112,7 @@ def load_data(Dataset, NORMALIZATION_DICT_FILENAME, Normalizer, Path, config_dir
     print(
         f"📊 Static data shape: {dataset_output.static_x.shape if hasattr(dataset_output, 'static_x') else 'N/A'}"
     )
-
-    return dataset_output, normalizer, normalizing_dict
+    return (dataset_output,)
 
 
 @app.cell
@@ -151,7 +154,7 @@ def load_model(DATA_FOLDER, Encoder):
 
 
 @app.cell
-def define_embedding_function(Encoder, DatasetOutput, MaskedOutput, np, rearrange, torch, tqdm):
+def define_embedding_function(MaskedOutput, np, rearrange, torch, tqdm):
     from typing import Any
 
     print("🔄 STEP 4: Defining embedding function...")
@@ -243,7 +246,6 @@ def generate_embeddings(dataset_output, make_embeddings, model, rearrange):
     print(f"📊 Embedding dimension: {embeddings_flat.shape[1]}")
     print(f"📊 Number of pixels: {embeddings_flat.shape[0]}")
     print("✅ Embeddings ready for analysis!")
-
     return embeddings, embeddings_flat
 
 
@@ -264,7 +266,6 @@ def cluster_embeddings(KMeans, embeddings, embeddings_flat, np, rearrange):
     labels = rearrange(labels, "(h w) -> h w", h=embeddings.shape[0], w=embeddings.shape[1])
     print(f"📊 Reshaped labels shape: {labels.shape}")
     print("✅ K-means clustering analysis complete!")
-
     return (labels,)
 
 
@@ -287,8 +288,7 @@ def reduce_dimensions(PCA, embeddings, embeddings_flat, rearrange):
     )
     print(f"📊 Reshaped PCA embeddings shape: {embeddings_reduced.shape}")
     print("✅ PCA dimensionality reduction complete!")
-
-    return embeddings_pca, embeddings_reduced
+    return (embeddings_reduced,)
 
 
 @app.cell
@@ -330,8 +330,7 @@ def plot_results(embeddings_reduced, labels, plt):
     print("   - Reduced dimensionality with PCA")
     print("   - Created 2 visualizations")
     print("🎯 The Marimo notebook has run successfully with detailed logging!")
-
-    return (embeddings_normalized,)
+    return
 
 
 if __name__ == "__main__":

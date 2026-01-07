@@ -13,7 +13,7 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: [types-requests]
-        exclude: ^(venv|notebooks|anysat)/
+        exclude: ^src/eval/(baseline_models|cropharvest)/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0

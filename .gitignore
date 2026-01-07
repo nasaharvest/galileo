@@ -2,7 +2,6 @@ __pycache__
 # data needs to be explicitly added
 data/*
 .ipynb_checkpoints
-__marimo__/
 baseline_weights
 models
 slurm
