@@ -49,6 +49,7 @@ dev = [
     "mypy==1.8.0",
     "coverage==7.4.0",
     "pre-commit==3.6.0",
+    "marimo",
 ]
 
 [project.urls]
@@ -69,3 +70,8 @@ packages = ["src"]
 lint.extend-select = ["I"]
 line-length = 99
 exclude = ["anysat"]
+
+[dependency-groups]
+dev = [
+    "marimo>=0.18.4",
+]
