@@ -41,6 +41,8 @@ dependencies = [
     "satlaspretrain-models",
     "timm",
     "breizhcrops",
+    "requests>=2.25.0",
+    "python-dotenv>=0.19.0",
 ]
 
 [project.optional-dependencies]
