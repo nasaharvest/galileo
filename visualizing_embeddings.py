@@ -11,6 +11,9 @@ def intro():
 
     This notebook demonstrates how to make embeddings with the Galileo models using real data (exported by our GEE exporter).
 
+    **Note for developers**: After editing this marimo notebook, run `python update_notebook.py`
+    to regenerate the Jupyter notebook with embedded plots for proper GitHub rendering.
+
     Our GEE exporter is called using the following script:
     ```python
     from datetime import date

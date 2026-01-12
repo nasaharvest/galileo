@@ -127,7 +127,17 @@ uv run mypy .                          # Type checking
 uv run pre-commit run --all-files      # Run all pre-commit checks
 uv run marimo run visualizing_embeddings.py  # Run marimo app for visualization
 uv run marimo edit visualizing_embeddings.py # Edit marimo app
+python update_notebook.py             # Regenerate Jupyter notebook with embedded plots for GitHub
 ```
+
+**Marimo notebook workflow:**
+The [marimo app](visualizing_embeddings.py) provides interactive visualization of Galileo model outputs. When you make changes to the marimo notebook:
+
+1. Edit interactively: `uv run marimo edit visualizing_embeddings.py`
+2. Regenerate GitHub version: `python update_notebook.py`
+3. Commit both files: `git add visualizing_embeddings.py __marimo__/visualizing_embeddings.ipynb`
+
+The `update_notebook.py` script ensures plots are properly embedded in the Jupyter notebook for GitHub rendering.
 
 **Optional - Codecov setup:**
 1. Sign in at https://codecov.io with GitHub
