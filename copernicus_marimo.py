@@ -82,10 +82,7 @@ def __():
 
 
 @app.cell
-@app.cell
-def __():
-    from datetime import datetime, timedelta
-
+def __(datetime, timedelta):
     # Date range configuration
     print("\n📅 CONFIGURING DATE RANGE")
     print("=" * 35)
@@ -103,9 +100,7 @@ def __():
 
 
 @app.cell
-def __():
-    from datetime import datetime
-
+def __(client_ready, copernicus_client, datetime):
     # Initialize Copernicus client
     print("\n🔧 INITIALIZING COPERNICUS CLIENT")
     print("=" * 45)
