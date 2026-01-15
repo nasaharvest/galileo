@@ -164,10 +164,11 @@ def extract_rgb_composite(
             # This saves 99%+ memory and makes processing much faster.
             if bbox is not None and bounds_wgs84 is not None:
                 print(f"Cropping to bbox: {bbox}")
-                rgb_display = crop_to_bbox(rgb_display, bounds_wgs84, bbox)
-                if rgb_display is None:
+                cropped_result = crop_to_bbox(rgb_display, bounds_wgs84, bbox)
+                if cropped_result is None:
                     print("Cropping failed, returning None")
                     return None
+                rgb_display = cropped_result
                 # Update bounds to reflect cropped area
                 bounds_wgs84 = tuple(bbox)
 
@@ -496,10 +497,11 @@ def extract_sar_composite(
             # This saves 99%+ memory and makes processing much faster.
             if bbox is not None and bounds_wgs84 is not None:
                 print(f"Cropping SAR to bbox: {bbox}")
-                sar_display = crop_to_bbox(sar_display, bounds_wgs84, bbox)
-                if sar_display is None:
+                cropped_result = crop_to_bbox(sar_display, bounds_wgs84, bbox)
+                if cropped_result is None:
                     print("SAR cropping failed, returning None")
                     return None
+                sar_display = cropped_result
                 # Update bounds to reflect cropped area
                 bounds_wgs84 = tuple(bbox)
 

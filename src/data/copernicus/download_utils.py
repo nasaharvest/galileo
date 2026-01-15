@@ -29,14 +29,19 @@ def download_with_retry(
     """Download a file with automatic retry and token refresh.
 
     This function handles large file downloads (1-10 GB) that may take longer
-    than the OAuth token lifetime (~10 minutes). It refreshes the token
-    periodically and retries on failures.
+    than the OAuth token lifetime (~10 minutes). It uses HTTP Range requests
+    to resume downloads and refreshes tokens between retry attempts.
 
     Key features:
-    - Token refresh every 5 minutes during download
+    - Fresh token for each download attempt
     - Automatic retry with exponential backoff on failures
     - Resume partial downloads using HTTP Range requests
     - Progress bar for user feedback
+
+    IMPORTANT: For downloads longer than token lifetime (~10 min), the download
+    will fail and automatically retry with a fresh token, resuming from where
+    it left off using HTTP Range requests. This is more reliable than trying
+    to refresh mid-stream.
 
     Args:
         client: CopernicusClient for authentication
@@ -59,8 +64,6 @@ def download_with_retry(
     # Track download progress
     bytes_downloaded = 0
     retry_count = 0
-    last_token_refresh = time.time()
-    token_refresh_interval = 300  # Refresh token every 5 minutes
 
     # Create parent directory if needed
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,14 +78,8 @@ def download_with_retry(
 
     while retry_count <= max_retries:
         try:
-            # Refresh token if needed (before starting/resuming download)
-            current_time = time.time()
-            if current_time - last_token_refresh > token_refresh_interval:
-                print("🔄 Refreshing authentication token...")
-                client._get_access_token()  # Force token refresh
-                last_token_refresh = current_time
-
-            # Get fresh token for this attempt
+            # Always get a fresh token for each attempt
+            # This ensures we have a valid token even if previous attempt took a long time
             token = client._get_access_token()
             headers = {
                 "Authorization": f"Bearer {token}",
@@ -105,6 +102,11 @@ def download_with_retry(
                     bytes_downloaded = 0
                     if output_path.exists():
                         output_path.unlink()
+            elif response.status_code == 401:  # Token expired during download
+                print("🔄 Token expired, refreshing and retrying...")
+                client._access_token = None  # Force token refresh
+                retry_count += 1
+                continue
             else:
                 response.raise_for_status()
 
@@ -126,13 +128,6 @@ def download_with_retry(
                             chunk_len = len(chunk)
                             bytes_downloaded += chunk_len
                             pbar.update(chunk_len)
-
-                            # Check if we need to refresh token during download
-                            current_time = time.time()
-                            if current_time - last_token_refresh > token_refresh_interval:
-                                # Token might expire soon, but we can't refresh mid-stream
-                                # Just note it for the next retry if this fails
-                                last_token_refresh = current_time
 
             # Verify download completed
             if bytes_downloaded >= total_size:
