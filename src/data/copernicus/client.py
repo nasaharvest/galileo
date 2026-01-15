@@ -208,6 +208,7 @@ class CopernicusClient:
         product_type: str = "S2MSI1C",
         download_data: bool = True,
         interactive: bool = True,
+        max_products: int = 3,
     ) -> List[Path]:
         """Fetch Sentinel-2 products for a given area and time period.
 
@@ -232,6 +233,10 @@ class CopernicusClient:
                          - "S2MSI2A": Level-2A (bottom-of-atmosphere reflectance, atmospherically corrected)
             download_data: If True, download actual satellite imagery. If False, only fetch metadata.
             interactive: If True, prompt user for download confirmation when products are found.
+            max_products: Maximum number of products to download/process.
+                         Default: 3 (prevents accidental huge downloads)
+                         Set to higher value or None for unlimited
+                         Example: max_products=10 for 10 products
 
         Returns:
             List of Path objects pointing to downloaded imagery files or metadata files.
@@ -265,6 +270,7 @@ class CopernicusClient:
             product_type=product_type,
             download_data=download_data,
             interactive=interactive,
+            max_products=max_products,
         )
 
     def fetch_s1(
@@ -276,6 +282,9 @@ class CopernicusClient:
         product_type: str = "GRD",
         polarization: str = "VV,VH",
         orbit_direction: str = "ASCENDING",
+        acquisition_mode: str = "IW",
+        download_data: bool = True,
+        max_products: int = 3,
     ) -> List[Path]:
         """Fetch Sentinel-1 products for a given area and time period.
 
@@ -303,10 +312,98 @@ class CopernicusClient:
                            - "ASCENDING": Satellite moving from south to north
                            - "DESCENDING": Satellite moving from north to south
                            Different directions can show different aspects of terrain.
+            acquisition_mode: SAR acquisition mode (default: "IW")
+
+                             WHAT IS ACQUISITION MODE:
+                             Sentinel-1 SAR can operate in different imaging modes,
+                             like a camera with different lenses. Each mode trades
+                             off between coverage area and resolution.
+
+                             AVAILABLE MODES:
+                             - "IW" (Interferometric Wide Swath): DEFAULT
+                               Coverage: 250km wide, Resolution: 10m
+                               Use: General land monitoring (95% of cases)
+                               Best for: Agriculture, forests, urban areas, most ML applications
+
+                             - "EW" (Extra Wide Swath):
+                               Coverage: 400km wide, Resolution: 40m
+                               Use: Ocean monitoring, polar regions, wide area surveillance
+                               Best for: Maritime surveillance, ice sheets, large-scale monitoring
+
+                             - "SM" (Strip Map):
+                               Coverage: 80km wide, Resolution: 5m
+                               Use: Emergency response, detailed monitoring
+                               Best for: Disasters, high-detail urban mapping, infrastructure
+
+                             - "WV" (Wave Mode):
+                               Coverage: 20km samples, Resolution: 5m
+                               Use: Ocean wave studies (very specialized)
+                               Best for: Ocean wave height/direction analysis
+
+                             WHAT CHANGES WITH MODE:
+                             ✅ Resolution (how detailed the image is)
+                                IW=10m, EW=40m, SM=5m, WV=5m
+                             ✅ Coverage area (how wide the swath is)
+                                IW=250km, EW=400km, SM=80km, WV=20km samples
+                             ✅ Image size (number of pixels)
+                                Higher resolution = more pixels for same area
+
+                             WHAT DOESN'T CHANGE:
+                             ❌ Polarizations (always VV, VH or HH, HV)
+                             ❌ Data format (always 2-channel array)
+                             ❌ Visualization (same grayscale SAR display)
+                             ❌ Processing code (same functions work for all modes)
+                             ❌ Backscatter values (same dB range -30 to 0)
+
+                             VISUAL COMPARISON:
+                             Satellite flying →
+
+                             EW Mode:  ████████████████████████████████  (400km, lower res)
+                             IW Mode:  ████████████████████              (250km, good res) ← DEFAULT
+                             SM Mode:  ██████████                        (80km, high res)
+                             WV Mode:  ██  ██  ██  ██                    (samples only)
+
+                             FOR GALILEO ML:
+                             - Use IW mode (default) for consistency across your dataset
+                             - Don't mix modes in the same training set (different resolutions)
+                             - IW provides the best balance of coverage and resolution
+                             - Most Sentinel-1 data available is IW mode (95%+ of acquisitions)
+
+                             WHEN TO USE EACH MODE:
+                             - IW: Default choice, works for 95% of use cases
+                                   Land monitoring, agriculture, forestry, urban areas
+                             - EW: When you need very wide coverage and resolution isn't critical
+                                   Ocean monitoring, polar ice, maritime surveillance
+                             - SM: When you need maximum detail in a smaller area
+                                   Emergency response, disaster mapping, detailed infrastructure
+                             - WV: Only for specialized ocean wave analysis
+                                   Rarely used for general remote sensing
+
+                             Example:
+                             >>> # Default (IW) - works for 95% of cases
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date)
+                             >>>
+                             >>> # Ocean monitoring - use EW for wide coverage
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date,
+                             ...                            acquisition_mode="EW")
+                             >>>
+                             >>> # Disaster response - use SM for high detail
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date,
+                             ...                            acquisition_mode="SM")
+                             >>>
+                             >>> # Ocean wave analysis - use WV (specialized)
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date,
+                             ...                            acquisition_mode="WV")
+            download_data: If True, download actual SAR imagery (1-2GB per product).
+                          If False, only fetch metadata (few KB per product).
+                          Default: True
+            max_products: Maximum number of products to download/process.
+                         Default: 3 (prevents accidental huge downloads)
+                         Set to higher value or None for unlimited
+                         Example: max_products=10 for 10 products
 
         Returns:
-            List of Path objects pointing to downloaded files or metadata files.
-            Currently returns metadata JSON files; future versions will download actual imagery.
+            List of Path objects pointing to downloaded ZIP files or metadata JSON files.
 
         Raises:
             ValueError: If input parameters are invalid (e.g., invalid bbox coordinates,
@@ -331,6 +428,22 @@ class CopernicusClient:
         if orbit_direction not in ["ASCENDING", "DESCENDING"]:
             raise ValueError("orbit_direction must be ASCENDING or DESCENDING")
 
+        # Validate acquisition mode parameter
+        if acquisition_mode not in ["IW", "EW", "SM", "WV"]:
+            raise ValueError(
+                f"acquisition_mode must be IW, EW, SM, or WV. Got: {acquisition_mode}\n"
+                "\n"
+                "Available modes:\n"
+                "  IW (default): 250km coverage, 10m resolution - general land monitoring\n"
+                "                Best for agriculture, forests, urban areas (95% of use cases)\n"
+                "  EW: 400km coverage, 40m resolution - ocean/polar regions\n"
+                "      Best for maritime surveillance, ice sheets, wide area monitoring\n"
+                "  SM: 80km coverage, 5m resolution - emergency response\n"
+                "      Best for disasters, high-detail urban mapping, infrastructure\n"
+                "  WV: 20km samples, 5m resolution - ocean waves only\n"
+                "      Specialized for ocean wave height/direction analysis\n"
+            )
+
         # Delegate the actual work to the S1-specific module
         # This keeps the client class focused on coordination and validation
         return fetch_s1_products(
@@ -341,4 +454,7 @@ class CopernicusClient:
             product_type=product_type,
             polarization=polarization,
             orbit_direction=orbit_direction,
+            acquisition_mode=acquisition_mode,
+            download_data=download_data,
+            max_products=max_products,
         )

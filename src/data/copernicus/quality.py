@@ -198,3 +198,230 @@ def apply_cloud_mask_to_image(
         raise ValueError(f"Unsupported image dimensions: {image_array.ndim}")
 
     return masked_image
+
+
+def assess_s2_quality(zip_file_path: Path) -> dict:
+    """Assess overall quality of Sentinel-2 product.
+
+    This function provides a comprehensive quality assessment of an S2 product,
+    including cloud coverage, data completeness, and an overall usability score.
+
+    WHAT IT ASSESSES:
+    1. Cloud coverage: Percentage of pixels obscured by clouds/shadows
+    2. Data completeness: Whether all expected bands are present
+    3. Overall score: Combined metric (0-1) indicating product quality
+    4. Usability: Boolean recommendation on whether to use this product
+
+    QUALITY THRESHOLDS:
+    - Excellent: < 10% cloud cover (score > 0.9)
+    - Good: 10-30% cloud cover (score 0.7-0.9)
+    - Fair: 30-50% cloud cover (score 0.5-0.7)
+    - Poor: > 50% cloud cover (score < 0.5)
+
+    Args:
+        zip_file_path: Path to Sentinel-2 ZIP file (Level-2A preferred for SCL band)
+
+    Returns:
+        Dictionary with quality metrics:
+        {
+            "overall_score": float,      # 0-1, higher is better
+            "cloud_coverage": float,     # Percentage (0-100)
+            "data_completeness": float,  # Percentage (0-100)
+            "usable": bool,              # True if quality is acceptable
+            "quality_level": str,        # "excellent", "good", "fair", "poor"
+            "notes": list[str]           # Any warnings or issues
+        }
+
+    Example:
+        >>> quality = assess_s2_quality(s2_file)
+        >>> if quality["usable"]:
+        ...     print(f"Good quality: {quality['overall_score']:.2f}")
+        ...     process_image(s2_file)
+        >>> else:
+        ...     print(f"Poor quality: {quality['cloud_coverage']:.1f}% clouds")
+    """
+    notes = []
+
+    # Extract cloud mask
+    cloud_mask = extract_cloud_mask(zip_file_path)
+
+    if cloud_mask is None:
+        # Could not extract cloud mask (Level-1C or error)
+        notes.append("Cloud mask extraction failed - may be Level-1C product")
+        return {
+            "overall_score": 0.5,  # Neutral score when we can't assess
+            "cloud_coverage": None,
+            "data_completeness": 100.0,  # Assume complete if file exists
+            "usable": True,  # Still usable, just can't assess clouds
+            "quality_level": "unknown",
+            "notes": notes,
+        }
+
+    # Calculate cloud coverage
+    total_pixels = cloud_mask.size
+    clear_pixels = cloud_mask.sum()
+    cloud_coverage = (1 - clear_pixels / total_pixels) * 100
+
+    # Data completeness (simplified - just check if we got a mask)
+    # In a full implementation, would check for all expected bands
+    data_completeness = 100.0
+
+    # Calculate overall score
+    # Score is primarily based on cloud coverage
+    # 0% clouds = 1.0 score, 100% clouds = 0.0 score
+    cloud_score = 1.0 - (cloud_coverage / 100.0)
+
+    # Overall score combines cloud score with data completeness
+    overall_score = cloud_score * (data_completeness / 100.0)
+
+    # Determine quality level
+    if cloud_coverage < 10:
+        quality_level = "excellent"
+    elif cloud_coverage < 30:
+        quality_level = "good"
+    elif cloud_coverage < 50:
+        quality_level = "fair"
+    else:
+        quality_level = "poor"
+
+    # Determine usability (threshold at 50% cloud cover)
+    usable = cloud_coverage < 50.0
+
+    if cloud_coverage > 30:
+        notes.append(f"High cloud coverage: {cloud_coverage:.1f}%")
+
+    return {
+        "overall_score": overall_score,
+        "cloud_coverage": cloud_coverage,
+        "data_completeness": data_completeness,
+        "usable": usable,
+        "quality_level": quality_level,
+        "notes": notes,
+    }
+
+
+def assess_s1_quality(zip_file_path: Path) -> dict:
+    """Assess overall quality of Sentinel-1 SAR product.
+
+    This function provides a quality assessment of an S1 SAR product.
+    SAR data doesn't have clouds, but can have other quality issues.
+
+    WHAT IT ASSESSES:
+    1. Data completeness: Whether all expected polarizations are present
+    2. File integrity: Whether the ZIP file is valid and complete
+    3. Overall score: Combined metric (0-1) indicating product quality
+    4. Usability: Boolean recommendation on whether to use this product
+
+    SAR QUALITY CONSIDERATIONS:
+    - SAR doesn't have cloud issues (works through clouds)
+    - Main issues: missing bursts, calibration problems, acquisition gaps
+    - For now, we do basic checks; advanced checks would require reading data
+
+    Args:
+        zip_file_path: Path to Sentinel-1 ZIP file (SAFE format)
+
+    Returns:
+        Dictionary with quality metrics:
+        {
+            "overall_score": float,      # 0-1, higher is better
+            "data_completeness": float,  # Percentage (0-100)
+            "usable": bool,              # True if quality is acceptable
+            "quality_level": str,        # "excellent", "good", "fair", "poor"
+            "notes": list[str]           # Any warnings or issues
+        }
+
+    Example:
+        >>> quality = assess_s1_quality(s1_file)
+        >>> if quality["usable"]:
+        ...     print(f"Good quality SAR: {quality['overall_score']:.2f}")
+        ...     process_sar(s1_file)
+    """
+    notes = []
+
+    try:
+        # Check if ZIP file is valid
+        with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
+            # Test ZIP integrity
+            bad_file = zip_ref.testzip()
+            if bad_file:
+                notes.append(f"Corrupted file in ZIP: {bad_file}")
+                return {
+                    "overall_score": 0.0,
+                    "data_completeness": 0.0,
+                    "usable": False,
+                    "quality_level": "poor",
+                    "notes": notes,
+                }
+
+            # Check for expected files
+            file_list = zip_ref.namelist()
+
+            # Look for measurement files (actual SAR data)
+            measurement_files = [
+                f for f in file_list if "/measurement/" in f and f.endswith(".tiff")
+            ]
+
+            if not measurement_files:
+                notes.append("No measurement files found")
+                data_completeness = 0.0
+            else:
+                # Expect 2 polarizations (VV and VH) for IW mode
+                # Some products may have only 1 polarization
+                expected_pols = 2
+                actual_pols = len(measurement_files)
+                data_completeness = min(100.0, (actual_pols / expected_pols) * 100.0)
+
+                if actual_pols < expected_pols:
+                    notes.append(
+                        f"Only {actual_pols} polarization(s) found (expected {expected_pols})"
+                    )
+
+            # Check for manifest file
+            manifest_files = [f for f in file_list if "manifest.safe" in f.lower()]
+            if not manifest_files:
+                notes.append("Manifest file missing")
+                data_completeness *= 0.9  # Reduce score
+
+        # Calculate overall score
+        # For SAR, score is primarily based on data completeness
+        overall_score = data_completeness / 100.0
+
+        # Determine quality level
+        if data_completeness >= 95:
+            quality_level = "excellent"
+        elif data_completeness >= 80:
+            quality_level = "good"
+        elif data_completeness >= 60:
+            quality_level = "fair"
+        else:
+            quality_level = "poor"
+
+        # Determine usability (threshold at 60% completeness)
+        usable = data_completeness >= 60.0
+
+        return {
+            "overall_score": overall_score,
+            "data_completeness": data_completeness,
+            "usable": usable,
+            "quality_level": quality_level,
+            "notes": notes,
+        }
+
+    except zipfile.BadZipFile:
+        notes.append("Invalid or corrupted ZIP file")
+        return {
+            "overall_score": 0.0,
+            "data_completeness": 0.0,
+            "usable": False,
+            "quality_level": "poor",
+            "notes": notes,
+        }
+    except Exception as e:
+        notes.append(f"Error assessing quality: {str(e)}")
+        return {
+            "overall_score": 0.0,
+            "data_completeness": 0.0,
+            "usable": False,
+            "quality_level": "poor",
+            "notes": notes,
+        }

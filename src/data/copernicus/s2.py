@@ -32,6 +32,7 @@ def fetch_s2_products(
     product_type: str,
     download_data: bool = True,
     interactive: bool = True,
+    max_products: int = 3,
 ) -> List[Path]:
     """Fetch Sentinel-2 products for given parameters.
 
@@ -52,6 +53,18 @@ def fetch_s2_products(
         product_type: Product type ("S2MSI1C" for Level-1C or "S2MSI2A" for Level-2A)
         download_data: If True, download actual satellite imagery. If False, only metadata.
         interactive: If True, prompt user for download confirmation when products are found.
+        max_products: Maximum number of products to download/process
+                     Default: 3 (prevents accidental huge downloads)
+                     Set to None for unlimited (use with caution!)
+
+                     WHY LIMIT:
+                     - Each S2 product is 500MB-1GB
+                     - 10 products = 5-10GB disk space
+                     - Downloads can take hours
+
+                     Example: For 1 year of data over small area,
+                     you might get 70+ products (one every 5 days).
+                     Default limit prevents overwhelming your system.
 
     Returns:
         List of Path objects pointing to downloaded imagery files or metadata files.
@@ -127,26 +140,37 @@ def fetch_s2_products(
 
     print(f"Found {len(products)} S2 products")
 
+    # Apply max_products limit if specified
+    # This prevents accidental huge downloads (each product is 500MB-1GB)
+    products_to_process = products
+    if max_products is not None and len(products) > max_products:
+        print(f"⚠️  Limiting to first {max_products} products (found {len(products)} total)")
+        print("   To download more, use max_products parameter:")
+        print(f"   client.fetch_s2(..., max_products={len(products)})")
+        products_to_process = products[:max_products]
+
     # Interactive user confirmation if requested
-    if interactive and products:
+    if interactive and products_to_process:
         print("\n🛰️ DOWNLOAD CONFIRMATION")
         print("=" * 40)
         print(f"Found {len(products)} Sentinel-2 products:")
 
-        for i, product in enumerate(products[:5], 1):  # Show first 5
+        for i, product in enumerate(products_to_process[:5], 1):  # Show first 5
             name = product.get("Name", "Unknown")
             size_mb = product.get("ContentLength", 0) / (1024 * 1024)
             print(f"  {i}. {name} ({size_mb:.1f} MB)")
 
-        if len(products) > 5:
-            print(f"  ... and {len(products) - 5} more products")
+        if len(products_to_process) > 5:
+            print(f"  ... and {len(products_to_process) - 5} more products")
 
-        total_size_gb = sum(p.get("ContentLength", 0) for p in products) / (1024**3)
+        total_size_gb = sum(p.get("ContentLength", 0) for p in products_to_process) / (1024**3)
         print(f"\nTotal size: {total_size_gb:.2f} GB")
 
         if download_data:
             print("Mode: Download actual satellite imagery")
-            response = input(f"\nDownload all {len(products)} products? [Y/n]: ").strip().lower()
+            response = (
+                input(f"\nDownload {len(products_to_process)} products? [Y/n]: ").strip().lower()
+            )
             if response and response not in ["y", "yes"]:
                 print("Download cancelled by user")
                 return []
@@ -160,8 +184,8 @@ def fetch_s2_products(
         print("\n📥 DOWNLOADING SATELLITE IMAGERY")
         print("=" * 45)
 
-        for i, product in enumerate(products[:3], 1):  # Limit to 3 for demo
-            print(f"\n🛰️ Downloading product {i}/{min(3, len(products))}")
+        for i, product in enumerate(products_to_process, 1):
+            print(f"\n🛰️ Downloading product {i}/{len(products_to_process)}")
 
             downloaded_file = _download_s2_product(client, product, resolution, i - 1)
             if downloaded_file:
@@ -174,7 +198,7 @@ def fetch_s2_products(
         print("=" * 35)
 
         # Create metadata files for the found products
-        for i, product in enumerate(products[:3]):  # Limit to first 3 for testing
+        for i, product in enumerate(products_to_process):
             metadata_file: Optional[Path] = _create_product_metadata(
                 client, product, resolution, i
             )
@@ -408,8 +432,7 @@ def _download_s2_product(
     Returns:
         Path to the downloaded file, or None if download failed
     """
-    import requests
-    from tqdm import tqdm
+    from .download_utils import download_with_retry
 
     # Extract product identifiers
     product_id: str = product.get("Id", f"unknown_{index}")
@@ -425,7 +448,7 @@ def _download_s2_product(
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Check if file already exists
-    if file_path.exists() and file_path.stat().st_size > 0:
+    if file_path.exists() and file_path.stat().st_size >= content_length:
         print(f"✅ Already downloaded: {filename}")
         return file_path
 
@@ -438,43 +461,19 @@ def _download_s2_product(
     print(f"   Size: {content_length / (1024*1024):.1f} MB")
     print(f"   URL: {download_url}")
 
-    try:
-        # Get access token for authentication
-        token = client._get_access_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "Galileo-Copernicus-Client/1.0",
-        }
+    # Use robust download with retry and token refresh
+    success = download_with_retry(
+        client=client,
+        url=download_url,
+        output_path=file_path,
+        total_size=content_length,
+        max_retries=3,
+    )
 
-        # Start download with streaming
-        response = requests.get(download_url, headers=headers, stream=True, timeout=300)
-        response.raise_for_status()
-
-        # Get actual content length from response headers
-        total_size = int(response.headers.get("content-length", content_length))
-
-        # Download with progress bar
-        with open(file_path, "wb") as f:
-            with tqdm(
-                total=total_size, unit="B", unit_scale=True, desc=f"Downloading {filename[:30]}..."
-            ) as pbar:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        pbar.update(len(chunk))
-
-        print(f"✅ Download complete: {filename}")
+    if success:
         return file_path
-
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Download failed: {e}")
-        # Clean up partial download
-        if file_path.exists():
-            file_path.unlink()
-        return None
-    except Exception as e:
-        print(f"❌ Unexpected error during download: {e}")
-        # Clean up partial download
+    else:
+        # Clean up failed download
         if file_path.exists():
             file_path.unlink()
         return None
