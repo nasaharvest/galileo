@@ -90,8 +90,8 @@ def download_with_retry(
             if bytes_downloaded > 0:
                 headers["Range"] = f"bytes={bytes_downloaded}-"
 
-            # Start download with streaming
-            response = requests.get(url, headers=headers, stream=True, timeout=300)
+            # Start download with streaming using client's session for connection pooling
+            response = client.session.get(url, headers=headers, stream=True, timeout=300)
 
             # Handle resume responses
             if response.status_code == 206:  # Partial Content (resume)
