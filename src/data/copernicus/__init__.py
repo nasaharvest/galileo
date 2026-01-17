@@ -1,10 +1,11 @@
-"""Copernicus Data Space Ecosystem client for fetching Sentinel-2 data."""
+"""Copernicus Data Space Ecosystem client for fetching Sentinel-1 and Sentinel-2 data."""
 
 from .client import CopernicusClient
 from .image_processing import (
     create_false_color_composite,
     crop_to_bbox,
     extract_rgb_composite,
+    extract_sar_composite,
     get_available_bands,
     get_image_statistics,
 )
@@ -21,6 +22,8 @@ from .visualization import (
     create_comparison_plot,
     create_coverage_map,
     create_metadata_summary,
+    create_sar_comparison_plot,
+    display_sar_image,
     display_satellite_image,
 )
 
@@ -28,6 +31,7 @@ __all__ = [
     "CopernicusClient",
     # Image processing
     "extract_rgb_composite",
+    "extract_sar_composite",
     "crop_to_bbox",
     "get_available_bands",
     "create_false_color_composite",
@@ -44,7 +48,9 @@ __all__ = [
     # Visualization
     "create_coverage_map",
     "display_satellite_image",
+    "display_sar_image",
     "create_comparison_plot",
+    "create_sar_comparison_plot",
     "create_metadata_summary",
     "create_band_analysis_plot",
 ]

@@ -271,3 +271,191 @@ class CopernicusClient:
             interactive=interactive,
             max_products=max_products,
         )
+
+    def fetch_s1(
+        self,
+        bbox: List[float],
+        start_date: str,
+        end_date: str,
+        *,
+        product_type: str = "GRD",
+        polarization: str = "VV,VH",
+        orbit_direction: str = "ASCENDING",
+        acquisition_mode: str = "IW",
+        download_data: bool = True,
+        max_products: int = 3,
+    ) -> List[Path]:
+        """Fetch Sentinel-1 products for a given area and time period.
+
+        This method searches for Sentinel-1 SAR (Synthetic Aperture Radar) imagery
+        that covers the specified bounding box during the given date range.
+        SAR imagery works day/night and through clouds, making it complementary to optical imagery.
+
+        Args:
+            bbox: Bounding box as [min_longitude, min_latitude, max_longitude, max_latitude]
+                  in WGS84 coordinate system (EPSG:4326). Example: [25.6796, -27.6721, 25.6897, -27.663]
+            start_date: Start date in YYYY-MM-DD format, e.g., "2022-01-01"
+            end_date: End date in YYYY-MM-DD format, e.g., "2022-01-31"
+            product_type: Type of Sentinel-1 product:
+                         - "GRD": Ground Range Detected (most common, preprocessed and ready to use)
+                         - "SLC": Single Look Complex (raw data, requires more processing)
+                         - "OCN": Ocean products (specialized for ocean analysis)
+            polarization: Radar polarization modes to include:
+                         - "VV": Vertical transmit, Vertical receive
+                         - "VH": Vertical transmit, Horizontal receive
+                         - "HH": Horizontal transmit, Horizontal receive
+                         - "HV": Horizontal transmit, Vertical receive
+                         - "VV,VH": Both VV and VH (most common for land applications)
+                         Different polarizations reveal different surface properties.
+            orbit_direction: Satellite orbit direction:
+                           - "ASCENDING": Satellite moving from south to north
+                           - "DESCENDING": Satellite moving from north to south
+                           Different directions can show different aspects of terrain.
+            acquisition_mode: SAR acquisition mode (default: "IW")
+
+                             WHAT IS ACQUISITION MODE:
+                             Sentinel-1 SAR can operate in different imaging modes,
+                             like a camera with different lenses. Each mode trades
+                             off between coverage area and resolution.
+
+                             AVAILABLE MODES:
+                             - "IW" (Interferometric Wide Swath): DEFAULT
+                               Coverage: 250km wide, Resolution: 10m
+                               Use: General land monitoring (95% of cases)
+                               Best for: Agriculture, forests, urban areas, most ML applications
+
+                             - "EW" (Extra Wide Swath):
+                               Coverage: 400km wide, Resolution: 40m
+                               Use: Ocean monitoring, polar regions, wide area surveillance
+                               Best for: Maritime surveillance, ice sheets, large-scale monitoring
+
+                             - "SM" (Strip Map):
+                               Coverage: 80km wide, Resolution: 5m
+                               Use: Emergency response, detailed monitoring
+                               Best for: Disasters, high-detail urban mapping, infrastructure
+
+                             - "WV" (Wave Mode):
+                               Coverage: 20km samples, Resolution: 5m
+                               Use: Ocean wave studies (very specialized)
+                               Best for: Ocean wave height/direction analysis
+
+                             WHAT CHANGES WITH MODE:
+                             ✅ Resolution (how detailed the image is)
+                                IW=10m, EW=40m, SM=5m, WV=5m
+                             ✅ Coverage area (how wide the swath is)
+                                IW=250km, EW=400km, SM=80km, WV=20km samples
+                             ✅ Image size (number of pixels)
+                                Higher resolution = more pixels for same area
+
+                             WHAT DOESN'T CHANGE:
+                             ❌ Polarizations (always VV, VH or HH, HV)
+                             ❌ Data format (always 2-channel array)
+                             ❌ Visualization (same grayscale SAR display)
+                             ❌ Processing code (same functions work for all modes)
+                             ❌ Backscatter values (same dB range -30 to 0)
+
+                             VISUAL COMPARISON:
+                             Satellite flying →
+
+                             EW Mode:  ████████████████████████████████  (400km, lower res)
+                             IW Mode:  ████████████████████              (250km, good res) ← DEFAULT
+                             SM Mode:  ██████████                        (80km, high res)
+                             WV Mode:  ██  ██  ██  ██                    (samples only)
+
+                             FOR GALILEO ML:
+                             - Use IW mode (default) for consistency across your dataset
+                             - Don't mix modes in the same training set (different resolutions)
+                             - IW provides the best balance of coverage and resolution
+                             - Most Sentinel-1 data available is IW mode (95%+ of acquisitions)
+
+                             WHEN TO USE EACH MODE:
+                             - IW: Default choice, works for 95% of use cases
+                                   Land monitoring, agriculture, forestry, urban areas
+                             - EW: When you need very wide coverage and resolution isn't critical
+                                   Ocean monitoring, polar ice, maritime surveillance
+                             - SM: When you need maximum detail in a smaller area
+                                   Emergency response, disaster mapping, detailed infrastructure
+                             - WV: Only for specialized ocean wave analysis
+                                   Rarely used for general remote sensing
+
+                             Example:
+                             >>> # Default (IW) - works for 95% of cases
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date)
+                             >>>
+                             >>> # Ocean monitoring - use EW for wide coverage
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date,
+                             ...                            acquisition_mode="EW")
+                             >>>
+                             >>> # Disaster response - use SM for high detail
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date,
+                             ...                            acquisition_mode="SM")
+                             >>>
+                             >>> # Ocean wave analysis - use WV (specialized)
+                             >>> s1_files = client.fetch_s1(bbox, start_date, end_date,
+                             ...                            acquisition_mode="WV")
+            download_data: If True, download actual SAR imagery (1-2GB per product).
+                          If False, only fetch metadata (few KB per product).
+                          Default: True
+            max_products: Maximum number of products to download/process.
+                         Default: 3 (prevents accidental huge downloads)
+                         Set to higher value or None for unlimited
+                         Example: max_products=10 for 10 products
+
+        Returns:
+            List of Path objects pointing to downloaded ZIP files or metadata JSON files.
+
+        Raises:
+            ValueError: If input parameters are invalid (e.g., invalid bbox coordinates,
+                       unsupported product type, invalid polarization, etc.)
+        """
+        # Validate all input parameters before proceeding
+        validate_bbox(bbox)  # Check bbox format and coordinate bounds
+        validate_date_range(start_date, end_date)  # Check date format and ordering
+
+        # Validate product type parameter
+        if product_type not in ["GRD", "SLC", "OCN"]:
+            raise ValueError("product_type must be GRD, SLC, or OCN")
+
+        # Validate polarization parameter
+        # Split by comma and check each polarization mode
+        valid_pols: set[str] = {"VV", "VH", "HH", "HV"}
+        requested_pols: set[str] = set(pol.strip() for pol in polarization.split(","))
+        if not requested_pols.issubset(valid_pols):
+            raise ValueError(f"Invalid polarization. Must be subset of {valid_pols}")
+
+        # Validate orbit direction parameter
+        if orbit_direction not in ["ASCENDING", "DESCENDING"]:
+            raise ValueError("orbit_direction must be ASCENDING or DESCENDING")
+
+        # Validate acquisition mode parameter
+        if acquisition_mode not in ["IW", "EW", "SM", "WV"]:
+            raise ValueError(
+                f"acquisition_mode must be IW, EW, SM, or WV. Got: {acquisition_mode}\n"
+                "\n"
+                "Available modes:\n"
+                "  IW (default): 250km coverage, 10m resolution - general land monitoring\n"
+                "                Best for agriculture, forests, urban areas (95% of use cases)\n"
+                "  EW: 400km coverage, 40m resolution - ocean/polar regions\n"
+                "      Best for maritime surveillance, ice sheets, wide area monitoring\n"
+                "  SM: 80km coverage, 5m resolution - emergency response\n"
+                "      Best for disasters, high-detail urban mapping, infrastructure\n"
+                "  WV: 20km samples, 5m resolution - ocean waves only\n"
+                "      Specialized for ocean wave height/direction analysis\n"
+            )
+
+        # Delegate the actual work to the S1-specific module
+        # This keeps the client class focused on coordination and validation
+        from .s1 import fetch_s1_products
+
+        return fetch_s1_products(
+            client=self,  # Pass self so S1 module can use our authentication and caching
+            bbox=bbox,
+            start_date=start_date,
+            end_date=end_date,
+            product_type=product_type,
+            polarization=polarization,
+            orbit_direction=orbit_direction,
+            acquisition_mode=acquisition_mode,
+            download_data=download_data,
+            max_products=max_products,
+        )

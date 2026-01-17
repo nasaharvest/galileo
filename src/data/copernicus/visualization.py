@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .image_processing import extract_rgb_composite, get_image_statistics
+from .image_processing import extract_rgb_composite, extract_sar_composite, get_image_statistics
 
 
 def create_coverage_map(
@@ -362,6 +362,210 @@ def create_band_analysis_plot(
                 transform=axes[idx].transAxes,
             )
             axes[idx].set_title("Processing Error")
+
+    plt.tight_layout()
+    return fig
+
+
+def display_sar_image(
+    zip_file_path: Path,
+    target_bbox: Optional[List[float]] = None,
+    ax: Optional[plt.Axes] = None,
+    polarization: str = "VV",
+    title: Optional[str] = None,
+    cmap: str = "gray",
+) -> Optional[plt.Axes]:
+    """Display Sentinel-1 SAR image with optional target area overlay.
+
+    WHAT YOU'LL SEE IN A SAR IMAGE:
+    SAR images show surface roughness and structure, not color like optical images:
+    - BRIGHT (white): Rough surfaces, buildings, ships, vegetation
+    - DARK (black): Smooth surfaces, calm water, roads, bare soil
+    - MEDIUM (gray): Mixed surfaces, agricultural fields, forests
+
+    INTERPRETING SAR BACKSCATTER:
+    - Water bodies: Very dark (smooth surface reflects radar away)
+    - Urban areas: Very bright (buildings create strong corner reflections)
+    - Forests: Medium-bright (volume scattering from tree canopy)
+    - Agricultural fields: Varies by crop type, growth stage, and moisture
+    - Mountains: Bright on radar-facing slopes, dark on opposite slopes
+
+    SPECKLE NOISE:
+    SAR images have a grainy "salt and pepper" appearance called speckle.
+    This is inherent to radar imaging (interference of radar waves) and not
+    a sensor defect. Speckle filtering can reduce this but may blur features.
+
+    Args:
+        zip_file_path: Path to Sentinel-1 ZIP file (GRD product)
+                      Example: S1A_IW_GRDH_1SDV_20220101T123456_..._.zip
+        target_bbox: Optional [min_lon, min_lat, max_lon, max_lat] to overlay
+                    If provided, draws red box showing area of interest
+        ax: Matplotlib axes (creates new figure if None)
+        polarization: Which polarization to display ('VV' or 'VH')
+                     VV: Better for water, urban, soil moisture
+                     VH: Better for vegetation, crop monitoring
+        title: Plot title (auto-generated if None)
+        cmap: Matplotlib colormap for display
+             'gray': Standard grayscale (most common for SAR)
+             'viridis': Color scale (can help see subtle variations)
+             'RdYlBu_r': Diverging colormap
+
+    Returns:
+        Matplotlib axes object, or None if processing failed
+
+    Example:
+        >>> # Display VV polarization
+        >>> display_sar_image(s1_file, target_bbox, polarization='VV')
+        >>>
+        >>> # Display VH polarization with color scale
+        >>> display_sar_image(s1_file, target_bbox, polarization='VH', cmap='viridis')
+    """
+    # Extract SAR composite with both polarizations
+    # We extract both but only display the requested one
+    sar_data = extract_sar_composite(zip_file_path, polarizations=["VV", "VH"])
+    if sar_data is None:
+        print(f"Failed to extract SAR data from {zip_file_path.name}")
+        return None
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+    # Get the requested polarization
+    # sar_array shape: (H, W, num_polarizations)
+    polarizations = sar_data["polarizations"]
+    if polarization not in polarizations:
+        print(f"Polarization {polarization} not found. Available: {polarizations}")
+        # Fall back to first available polarization
+        polarization = polarizations[0]
+        print(f"Using {polarization} instead")
+
+    pol_idx = polarizations.index(polarization)
+    sar_image = sar_data["sar_array"][:, :, pol_idx]
+
+    # Display the SAR image
+    # Bounds define the geographic extent of the image
+    bounds = sar_data["bounds_wgs84"]
+    extent = (bounds[0], bounds[2], bounds[1], bounds[3])  # (min_lon, max_lon, min_lat, max_lat)
+
+    # Display with appropriate colormap
+    # vmin/vmax set the display range for dB values
+    im = ax.imshow(
+        sar_image,
+        extent=extent,
+        aspect="auto",
+        cmap=cmap,
+        vmin=-25,  # Typical minimum for visualization (very dark)
+        vmax=0,  # Typical maximum for visualization (bright)
+    )
+
+    # Add colorbar to show backscatter scale
+    plt.colorbar(im, ax=ax, label=f"{polarization} Backscatter (dB)")
+
+    # Add target area overlay if provided
+    if target_bbox is not None:
+        bbox_lons = [
+            target_bbox[0],
+            target_bbox[2],
+            target_bbox[2],
+            target_bbox[0],
+            target_bbox[0],
+        ]
+        bbox_lats = [
+            target_bbox[1],
+            target_bbox[1],
+            target_bbox[3],
+            target_bbox[3],
+            target_bbox[1],
+        ]
+        ax.plot(bbox_lons, bbox_lats, "red", linewidth=3, alpha=0.8, label="Target Area")
+
+        # Zoom to target area with padding
+        padding = 0.02
+        ax.set_xlim(target_bbox[0] - padding, target_bbox[2] + padding)
+        ax.set_ylim(target_bbox[1] - padding, target_bbox[3] + padding)
+
+    # Customize plot
+    ax.set_xlabel("Longitude (°E)", fontsize=12)
+    ax.set_ylabel("Latitude (°N)", fontsize=12)
+
+    if title is None:
+        # Create informative title with key metadata
+        resolution = sar_data["metadata"].get("resolution_m", (None, None))
+        res_str = f"{resolution[0]:.0f}m" if resolution[0] else "unknown"
+        title = (
+            f"Sentinel-1 SAR - {polarization} Polarization\n"
+            f"{zip_file_path.name[:50]}... (Resolution: {res_str})"
+        )
+    ax.set_title(title, fontsize=11, fontweight="bold")
+
+    ax.grid(True, alpha=0.3, color="yellow")
+    if target_bbox is not None:
+        ax.legend()
+
+    # Add interpretation guide as text box
+    interpretation = (
+        "SAR Interpretation:\n"
+        "• Bright = Rough surfaces\n"
+        "• Dark = Smooth surfaces\n"
+        "• Water = Very dark\n"
+        "• Urban = Very bright"
+    )
+    ax.text(
+        0.02,
+        0.98,
+        interpretation,
+        transform=ax.transAxes,
+        fontsize=9,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", alpha=0.8),
+    )
+
+    return ax
+
+
+def create_sar_comparison_plot(
+    zip_file_path: Path,
+    target_bbox: Optional[List[float]] = None,
+    figsize: Tuple[int, int] = (16, 6),
+) -> plt.Figure:
+    """Create side-by-side comparison of VV and VH polarizations.
+
+    This visualization helps understand how different polarizations reveal
+    different surface properties:
+    - VV: Emphasizes surface roughness, good for water/urban detection
+    - VH: Emphasizes volume scattering, good for vegetation monitoring
+
+    Args:
+        zip_file_path: Path to Sentinel-1 ZIP file
+        target_bbox: Optional bounding box to overlay
+        figsize: Figure size (width, height)
+
+    Returns:
+        Matplotlib figure object with two subplots
+
+    Example:
+        >>> fig = create_sar_comparison_plot(s1_file, target_bbox)
+        >>> plt.show()
+    """
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # Display VV polarization
+    display_sar_image(
+        zip_file_path,
+        target_bbox,
+        ax=axes[0],
+        polarization="VV",
+        title="VV Polarization\n(Surface Scattering)",
+    )
+
+    # Display VH polarization
+    display_sar_image(
+        zip_file_path,
+        target_bbox,
+        ax=axes[1],
+        polarization="VH",
+        title="VH Polarization\n(Volume Scattering)",
+    )
 
     plt.tight_layout()
     return fig
