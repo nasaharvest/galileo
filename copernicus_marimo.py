@@ -393,9 +393,9 @@ def _(
                     print(f"\n  → ✅ SUCCESS: Downloaded {len(downloaded_files)} products")
                     download_result += f"✅ Downloaded {len(downloaded_files)} products!\n\n"
                     download_result += "📁 Files:\n"
-                    for f in downloaded_files:
-                        download_result += f"  • {f}\n"
-                        print(f"     - {f}")
+                    for _f in downloaded_files:
+                        download_result += f"  • {_f}\n"
+                        print(f"     - {_f}")
                 else:
                     print("\n  → ⚠️  No products found for this search")
                     download_result += "⚠️ No products found."
@@ -426,11 +426,21 @@ def _(
     max_lon,
     min_lat,
     min_lon,
+    mo,
     satellite_type,
     traceback,
 ):
+    print("=" * 80)
     print("🔄 VISUALIZATION CELL - Checking if there are files to visualize...")
+    print("=" * 80)
     print(f"  → Number of downloaded files: {len(downloaded_files) if downloaded_files else 0}")
+
+    if downloaded_files:
+        print("  → Downloaded files list:")
+        for idx, _f in enumerate(downloaded_files):
+            print(f"     [{idx}] {_f}")
+            print(f"         Type: {type(_f)}")
+            print(f"         Exists: {_f.exists() if hasattr(_f, 'exists') else 'N/A'}")
 
     # Initialize result
     viz_result = None
@@ -452,41 +462,101 @@ def _(
             _viz_bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
             num_files = min(len(downloaded_files), 2)  # Max 2 images
             print(f"  → Visualizing {num_files} files")
+            print(f"  → Target bbox: {_viz_bbox}")
+            print(f"  → Satellite type: {satellite_type.value}")
 
             # Create subplot grid
-            print("  → Creating matplotlib figure...")
+            print("\n  → Creating matplotlib figure...")
             fig, axes = plt.subplots(1, num_files, figsize=(12, 6))
             if num_files == 1:
                 axes = [axes]  # Make it a list for consistency
-            print("  → ✅ Figure created")
+            print(f"  → ✅ Figure created with {num_files} subplot(s)")
+            print(f"  → Figure size: {fig.get_size_inches()}")
+            print(f"  → Axes type: {type(axes)}, length: {len(axes)}")
 
             # Render each file
             for idx, file_path in enumerate(downloaded_files[:num_files]):
-                print(f"  → Rendering file {idx+1}/{num_files}: {file_path}")
+                print(f"\n  → {'='*60}")
+                print(f"  → Rendering file {idx+1}/{num_files}")
+                print(f"  → {'='*60}")
+                print(f"  → File path: {file_path}")
+                print(f"  → File type: {type(file_path)}")
+                print(f"  → Axes[{idx}]: {axes[idx]}")
 
                 if satellite_type.value == "S2":
-                    print("    → Using display_satellite_image (RGB)")
-                    display_satellite_image(file_path, _viz_bbox, ax=axes[idx])
+                    print("    → Calling display_satellite_image (RGB)...")
+                    print(f"    → Parameters: file={file_path}, bbox={_viz_bbox}, ax={axes[idx]}")
+
+                    result_ax = display_satellite_image(file_path, _viz_bbox, ax=axes[idx])
+
+                    print(f"    → display_satellite_image returned: {result_ax}")
+                    print(f"    → Return type: {type(result_ax)}")
+
+                    if result_ax is None:
+                        print("    → ⚠️  WARNING: display_satellite_image returned None!")
+                        print("    → This means RGB extraction likely failed")
+                        # Add a text message to the plot
+                        axes[idx].text(
+                            0.5,
+                            0.5,
+                            "Image extraction failed",
+                            ha="center",
+                            va="center",
+                            transform=axes[idx].transAxes,
+                        )
+                    else:
+                        print(f"    → ✅ Image rendered successfully on axes {idx}")
                 else:
-                    print("    → Using display_sar_image (VV polarization)")
-                    display_sar_image(file_path, _viz_bbox, ax=axes[idx], polarization="VV")
+                    print("    → Calling display_sar_image (VV polarization)...")
+                    print(f"    → Parameters: file={file_path}, bbox={_viz_bbox}, ax={axes[idx]}")
 
-                print(f"    → ✅ File {idx+1} rendered")
+                    result_ax = display_sar_image(
+                        file_path, _viz_bbox, ax=axes[idx], polarization="VV"
+                    )
 
+                    print(f"    → display_sar_image returned: {result_ax}")
+                    print(f"    → Return type: {type(result_ax)}")
+
+                    if result_ax is None:
+                        print("    → ⚠️  WARNING: display_sar_image returned None!")
+                        print("    → This means SAR extraction likely failed")
+                        axes[idx].text(
+                            0.5,
+                            0.5,
+                            "SAR extraction failed",
+                            ha="center",
+                            va="center",
+                            transform=axes[idx].transAxes,
+                        )
+                    else:
+                        print(f"    → ✅ SAR image rendered successfully on axes {idx}")
+
+            print("\n  → Applying tight_layout...")
             plt.tight_layout()
+
+            print("  → Setting viz_result to figure...")
             viz_result = fig
+            print(f"  → viz_result type: {type(viz_result)}")
+            print(f"  → viz_result value: {viz_result}")
             print("  → ✅ Visualization complete")
 
         except Exception as e:
             # Handle visualization errors
             error_msg = f"Visualization error: {str(e)}"
-            viz_result = error_msg
-            print("\n  → ❌ Visualization error:")
+            print("\n  → ❌ EXCEPTION CAUGHT:")
+            print(f"  → Error message: {error_msg}")
+            print("  → Full traceback:")
             print(traceback.format_exc())
+            viz_result = mo.md(
+                f"## ❌ Visualization Error\n\n```\n{error_msg}\n\n{traceback.format_exc()}\n```"
+            )
     else:
-        print("  → No files to visualize")
+        print("  → No files to visualize (downloaded_files is empty or None)")
 
+    print("=" * 80)
     print()
+
+    # Return the figure for Marimo to display
     viz_result
     return
 

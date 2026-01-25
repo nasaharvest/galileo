@@ -87,11 +87,13 @@ def extract_rgb_composite(
             # Find band files
             band_files = {}
             for band in bands:
-                # Try multiple naming patterns
+                # Try multiple naming patterns with recursive search
                 patterns = [
-                    f"*_{band}_10m.jp2",  # Standard pattern
-                    f"*_{band}.jp2",  # Alternative pattern
-                    f"*{band}.jp2",  # Simple pattern
+                    f"**/*_{band}_10m.jp2",  # Standard pattern in R10m subdirectory
+                    f"**/*_{band}.jp2",  # Alternative pattern
+                    f"**/*{band}.jp2",  # Simple pattern
+                    f"*_{band}_10m.jp2",  # Direct in IMG_DATA (legacy)
+                    f"*_{band}.jp2",  # Alternative direct
                 ]
 
                 for pattern in patterns:

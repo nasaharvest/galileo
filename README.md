@@ -63,6 +63,30 @@ If you want to see Galileo being used on real data, we also have a [marimo app](
 
 <img src="diagrams/model_outputs.png" alt="Galileo model outputs" height="300px"/>
 
+### Copernicus Data Explorer
+
+We provide an interactive [Copernicus marimo GUI](copernicus_marimo.py) for exploring and downloading Sentinel-1 and Sentinel-2 satellite data:
+
+```bash
+# Run the interactive GUI
+uv run marimo run copernicus_marimo.py
+```
+
+**Features:**
+- Configure Copernicus credentials (free OAuth2 API access)
+- Search and download Sentinel-1 (SAR) and Sentinel-2 (optical) data
+- Interactive parameter selection (location, dates, satellite type)
+- Visualize downloaded imagery with target area overlay
+- Automatic caching to avoid re-downloads
+
+**Get free Copernicus credentials:**
+1. Visit https://dataspace.copernicus.eu/
+2. Register (no credit card required)
+3. Go to "User Settings" → "API Credentials"
+4. Copy your Client ID and Client Secret
+
+The GUI will guide you through credential setup and data download.
+
 ### Model weights
 The nano model weights are available [on github](data/models/nano).
 
