@@ -415,7 +415,6 @@ def _(
 
     # Display the result message
     mo.md(download_result) if download_result else None
-
     return (downloaded_files,)
 
 
