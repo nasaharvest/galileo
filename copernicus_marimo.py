@@ -109,7 +109,7 @@ def _(credentials_configured, mo):
     client_secret_input = mo.ui.text(
         label="Client Secret", kind="password", placeholder="Enter your Client Secret"
     )
-    save_button = mo.ui.button(label="💾 Save Credentials")
+    save_button = mo.ui.run_button(label="💾 Save Credentials")
 
     print("  → Form widgets created")
     print()
