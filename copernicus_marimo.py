@@ -331,81 +331,88 @@ def _(
         else:
             print("  → ✅ Credentials are configured, proceeding...")
 
-            try:
-                # Import the Copernicus client
-                print("\n  → 📦 Importing CopernicusClient...")
-                from src.data.copernicus import CopernicusClient
+            # Show spinner while processing
+            with mo.status.spinner(title="Searching and downloading...") as _spinner:
+                try:
+                    # Import the Copernicus client
+                    _spinner.update(title="Importing libraries and downloading Products...")
+                    print("\n  → 📦 Importing CopernicusClient...")
+                    from src.data.copernicus import CopernicusClient
 
-                print("  → ✅ Import successful")
+                    print("  → ✅ Import successful")
 
-                # Get search parameters
-                _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
-                print(f"\n  → 📍 BBox: {_bbox}")
-                print(f"  → 🛰️  Satellite: {satellite_type.value}")
-                print(f"  → 📅 Date range: {start_date.value} to {end_date.value}")
-                print(f"  → 🔢 Max products: {max_products.value}")
+                    # Get search parameters
+                    _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
+                    print(f"\n  → 📍 BBox: {_bbox}")
+                    print(f"  → 🛰️  Satellite: {satellite_type.value}")
+                    print(f"  → 📅 Date range: {start_date.value} to {end_date.value}")
+                    print(f"  → 🔢 Max products: {max_products.value}")
 
-                # Initialize the client
-                print("\n  → 🔐 Initializing CopernicusClient...")
-                client = CopernicusClient()
-                print("  → ✅ Client initialized successfully")
+                    # Initialize the client
+                    _spinner.update(title="Initializing Copernicus client...")
+                    print("\n  → � Initializing CopernicusClient...")
+                    client = CopernicusClient()
+                    print("  → ✅ Client initialized successfully")
 
-                # Build initial result message
-                download_result = f"🔍 Searching for {satellite_type.value} products...\n"
-                download_result += f"📍 Area: {_bbox}\n"
-                download_result += f"📅 {start_date.value} to {end_date.value}\n\n"
+                    # Build initial result message
+                    download_result = f"🔍 Searching for {satellite_type.value} products...\n"
+                    download_result += f"� Area: {_bbox}\n"
+                    download_result += f"📅 {start_date.value} to {end_date.value}\n\n"
 
-                # Call appropriate fetch method based on satellite type
-                if satellite_type.value == "S2":
-                    print("\n  → 🛰️  Calling fetch_s2()...")
-                    downloaded_files = client.fetch_s2(
-                        bbox=_bbox,
-                        start_date=str(start_date.value),
-                        end_date=str(end_date.value),
-                        resolution=10,
-                        max_cloud_cover=30,
-                        product_type="S2MSI2A",
-                        download_data=True,
-                        interactive=False,
-                        max_products=max_products.value,
-                    )
-                    print(
-                        f"  → ✅ fetch_s2() returned {len(downloaded_files) if downloaded_files else 0} files"
-                    )
-                else:
-                    print("\n  → 🛰️  Calling fetch_s1()...")
-                    downloaded_files = client.fetch_s1(
-                        bbox=_bbox,
-                        start_date=str(start_date.value),
-                        end_date=str(end_date.value),
-                        product_type="GRD",
-                        polarization="VV,VH",
-                        orbit_direction="ASCENDING",
-                        download_data=True,
-                        max_products=max_products.value,
-                    )
-                    print(
-                        f"  → ✅ fetch_s1() returned {len(downloaded_files) if downloaded_files else 0} files"
-                    )
+                    # Call appropriate fetch method based on satellite type
+                    if satellite_type.value == "S2":
+                        _spinner.update(title="Searching for Sentinel-2 products...")
+                        print("\n  → 🛰️  Calling fetch_s2()...")
+                        downloaded_files = client.fetch_s2(
+                            bbox=_bbox,
+                            start_date=str(start_date.value),
+                            end_date=str(end_date.value),
+                            resolution=10,
+                            max_cloud_cover=30,
+                            product_type="S2MSI2A",
+                            download_data=True,
+                            interactive=False,
+                            max_products=max_products.value,
+                        )
+                        print(
+                            f"  → ✅ fetch_s2() returned {len(downloaded_files) if downloaded_files else 0} files"
+                        )
+                    else:
+                        _spinner.update(title="Searching for Sentinel-1 products...")
+                        print("\n  → 🛰️  Calling fetch_s1()...")
+                        downloaded_files = client.fetch_s1(
+                            bbox=_bbox,
+                            start_date=str(start_date.value),
+                            end_date=str(end_date.value),
+                            product_type="GRD",
+                            polarization="VV,VH",
+                            orbit_direction="ASCENDING",
+                            download_data=True,
+                            max_products=max_products.value,
+                        )
+                        print(
+                            f"  → ✅ fetch_s1() returned {len(downloaded_files) if downloaded_files else 0} files"
+                        )
 
-                # Check if we got any files
-                if downloaded_files:
-                    print(f"\n  → ✅ SUCCESS: Downloaded {len(downloaded_files)} products")
-                    download_result += f"✅ Downloaded {len(downloaded_files)} products!\n\n"
-                    download_result += "📁 Files:\n"
-                    for _f in downloaded_files:
-                        download_result += f"  • {_f}\n"
-                        print(f"     - {_f}")
-                else:
-                    print("\n  → ⚠️  No products found for this search")
-                    download_result += "⚠️ No products found."
+                    # Check if we got any files
+                    if downloaded_files:
+                        _spinner.update(title="Download complete!")
+                        print(f"\n  → ✅ SUCCESS: Downloaded {len(downloaded_files)} products")
+                        download_result += f"✅ Downloaded {len(downloaded_files)} products!\n\n"
+                        download_result += "📁 Files:\n"
+                        for _f in downloaded_files:
+                            download_result += f"  • {_f}\n"
+                            print(f"     - {_f}")
+                    else:
+                        print("\n  → ⚠️  No products found for this search")
+                        download_result += "⚠️ No products found."
 
-            except Exception as e:
-                # Handle any errors that occurred
-                error_details = traceback.format_exc()
-                download_result = f"❌ Error: {str(e)}\n\nSee console for details."
-                print("\n  → ❌ ERROR occurred:")
-                print(error_details)
+                except Exception as e:
+                    # Handle any errors that occurred
+                    error_details = traceback.format_exc()
+                    download_result = f"❌ Error: {str(e)}\n\nSee console for details."
+                    print("\n  → ❌ ERROR occurred:")
+                    print(error_details)
 
         print("=" * 80)
         print()

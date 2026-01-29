@@ -427,6 +427,11 @@ def display_sar_image(
         print(f"Failed to extract SAR data from {zip_file_path.name}")
         return None
 
+    # Check if bounds are available
+    if sar_data.get("bounds_wgs84") is None:
+        print(f"No geographic bounds found in SAR data from {zip_file_path.name}")
+        return None
+
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
