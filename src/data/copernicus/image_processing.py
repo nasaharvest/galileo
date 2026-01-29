@@ -582,10 +582,8 @@ def extract_sar_composite(
                             # In dB: -40 dB to +10 dB
                             band_data_db = 10 * np.log10(band_data + 1e-10)
 
-                            # Clip extreme values for better visualization
-                            # Values below -30 dB are typically noise
-                            # Values above +10 dB are rare (very strong scatterers)
-                            band_data_db = np.clip(band_data_db, -30, 10)
+                            # Don't clip here - let visualization handle the range
+                            # Different products may have different value ranges
                             sar_bands.append(band_data_db)
                         else:
                             sar_bands.append(band_data)
