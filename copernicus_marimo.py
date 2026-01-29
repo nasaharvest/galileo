@@ -1,3 +1,15 @@
+"""Copernicus Data Space Ecosystem Explorer - Interactive GUI
+
+This Marimo app provides an interactive interface for:
+1. Configuring Copernicus API credentials
+2. Searching for Sentinel-1 (SAR) and Sentinel-2 (optical) satellite data
+3. Downloading and visualizing satellite imagery
+
+The app uses the Copernicus Data Space Ecosystem API, which provides free access
+to Sentinel satellite data. No credit card required - just register at:
+https://dataspace.copernicus.eu/
+"""
+
 import marimo
 
 __generated_with = "0.18.4"
@@ -6,10 +18,7 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    print("=" * 80)
-    print("🚀 MARIMO APP STARTING - Importing libraries...")
-    print("=" * 80)
-
+    """Import required libraries for the application."""
     import os
     import traceback
     from datetime import datetime, timedelta
@@ -17,22 +26,20 @@ def _():
 
     import marimo as mo
 
-    print("✅ All imports successful")
-    print()
     return Path, datetime, mo, os, timedelta, traceback
 
 
 @app.cell
 def _(mo):
-    print("📝 Rendering header markdown...")
+    """Display the application header with instructions."""
     mo.md(
         """
     # Copernicus Data Space Ecosystem Explorer
 
     This interactive GUI allows you to:
-    1. Configure your Copernicus credentials
-    2. Search for Sentinel-1 (SAR) or Sentinel-2 (optical) satellite data
-    3. Download and visualize satellite imagery
+    1. **Configure credentials** - Save your Copernicus API credentials securely
+    2. **Search for data** - Find Sentinel-1 (SAR) or Sentinel-2 (optical) imagery
+    3. **Download & visualize** - Automatically download and display satellite images
 
     ## Getting Started
 
@@ -40,7 +47,11 @@ def _(mo):
     - Visit: https://dataspace.copernicus.eu/
     - Click "Register" (no credit card required)
     - After registration, go to "User Settings" → "API Credentials"
-    - Copy your Client ID and Client Secret
+    - Copy your Client ID and Client Secret below
+
+    **About the satellites:**
+    - **Sentinel-2 (S2)**: Optical imagery (like a camera), best for seeing colors, vegetation, water
+    - **Sentinel-1 (S1)**: Radar imagery (SAR), works through clouds, day/night, good for water detection
     """
     )
     return
@@ -48,12 +59,13 @@ def _(mo):
 
 @app.cell
 def _(Path):
-    print("🔍 CHECKING FOR EXISTING CREDENTIALS...")
+    """Check if Copernicus credentials are already configured in .env file.
 
-    # Check if .env file exists
+    This cell reads the .env file (if it exists) and checks for valid
+    COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET entries.
+    """
     env_path = Path(".env")
     env_exists = env_path.exists()
-    print(f"  → .env file exists: {env_exists}")
 
     # Initialize credential flags
     has_client_id = False
@@ -61,58 +73,69 @@ def _(Path):
 
     # If .env exists, check if it has valid credentials
     if env_exists:
-        print("  → Reading .env file...")
         with open(env_path, "r") as _f:
             content = _f.read()
-            # Check for CLIENT_ID
+            # Check for CLIENT_ID (must have non-empty value)
             has_client_id = (
                 "COPERNICUS_CLIENT_ID=" in content
                 and len(content.split("COPERNICUS_CLIENT_ID=")[1].split("\n")[0].strip()) > 0
             )
-            # Check for CLIENT_SECRET
+            # Check for CLIENT_SECRET (must have non-empty value)
             has_client_secret = (
                 "COPERNICUS_CLIENT_SECRET=" in content
                 and len(content.split("COPERNICUS_CLIENT_SECRET=")[1].split("\n")[0].strip()) > 0
             )
-            print(f"  → Has CLIENT_ID: {has_client_id}")
-            print(f"  → Has CLIENT_SECRET: {has_client_secret}")
-    else:
-        print("  → .env file does not exist")
 
-    # Determine if credentials are fully configured
+    # Credentials are configured only if both are present and non-empty
     credentials_configured = has_client_id and has_client_secret
-    print(f"  → ✅ Credentials configured: {credentials_configured}")
-    print()
+
     return credentials_configured, env_path
 
 
 @app.cell
 def _(credentials_configured, mo):
-    print("🎨 Rendering credential input form...")
+    """Display credential input form with status message.
 
-    # Show different status message based on credential state
+    Shows a green checkmark if credentials are already configured,
+    or a warning if they need to be entered.
+    """
+    # Show appropriate status message
     if credentials_configured:
-        print("  → Status: Credentials already configured")
         status_msg = mo.md(
-            "## ✅ Credentials Configured\n\nYour Copernicus credentials are set in `.env` file."
+            """
+            ## ✅ Credentials Configured
+
+            Your Copernicus credentials are saved in `.env` file.
+            You can proceed to search for satellite data below.
+
+            *To update credentials, enter new values and click Save.*
+            """
         )
     else:
-        print("  → Status: Credentials NOT configured")
         status_msg = mo.md(
-            "## ⚠️ Credentials Not Configured\n\nPlease enter your Copernicus credentials below."
+            """
+            ## ⚠️ Credentials Required
+
+            Please enter your Copernicus API credentials below.
+            These will be saved securely in a `.env` file.
+
+            **Don't have credentials yet?** Register for free at:
+            https://dataspace.copernicus.eu/
+            """
         )
 
-    # Create input widgets (password type hides the values)
+    # Create input widgets (password type hides the values for security)
     client_id_input = mo.ui.text(
-        label="Client ID", kind="password", placeholder="Enter your Client ID"
+        label="Client ID",
+        kind="password",
+        placeholder="Enter your Client ID from Copernicus",
     )
     client_secret_input = mo.ui.text(
-        label="Client Secret", kind="password", placeholder="Enter your Client Secret"
+        label="Client Secret",
+        kind="password",
+        placeholder="Enter your Client Secret from Copernicus",
     )
     save_button = mo.ui.run_button(label="💾 Save Credentials")
-
-    print("  → Form widgets created")
-    print()
 
     # Display the form vertically stacked
     mo.vstack([status_msg, client_id_input, client_secret_input, save_button])
@@ -129,41 +152,38 @@ def _(
     save_button,
     traceback,
 ):
-    print("🔄 CREDENTIAL SAVE CELL - Checking if save button was clicked...")
-    print(f"  → save_button.value = {save_button.value}")
+    """Save credentials to .env file when Save button is clicked.
 
-    # Initialize result message
+    This cell:
+    1. Validates that both fields are filled
+    2. Preserves any existing .env variables (doesn't overwrite other settings)
+    3. Writes COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET
+    4. Sets credentials in current environment for immediate use
+    """
     save_result = ""
 
-    # Check if the save button was clicked (value > 0)
+    # Only process if save button was clicked
     if save_button.value:
-        print("\n" + "=" * 80)
-        print("💾 SAVE BUTTON CLICKED!")
-        print("=" * 80)
-
         # Get values from input fields
         client_id = client_id_input.value
         client_secret = client_secret_input.value
 
-        print(f"  → Client ID length: {len(client_id) if client_id else 0}")
-        print(f"  → Client Secret length: {len(client_secret) if client_secret else 0}")
-
         # Validate that both fields have values
         if not client_id or not client_secret:
-            save_result = "❌ Error: Both fields are required"
-            print("  → ❌ Validation failed: One or both fields are empty")
-        else:
-            print("  → ✅ Validation passed: Both fields have values")
-            try:
-                print(f"  → 📝 Writing credentials to {env_path}...")
+            save_result = """
+            ❌ **Error: Both fields are required**
 
-                # Read existing .env content (preserve other variables)
+            Please enter both your Client ID and Client Secret.
+            """
+        else:
+            try:
+                # Read existing .env content to preserve other variables
                 existing_content = ""
                 if env_path.exists():
-                    print("  → Reading existing .env file...")
                     with open(env_path, "r") as _f:
                         lines = _f.readlines()
                         # Keep all lines except COPERNICUS credentials
+                        # (we'll add updated ones below)
                         existing_content = "".join(
                             [
                                 line
@@ -172,38 +192,36 @@ def _(
                                 and not line.startswith("COPERNICUS_CLIENT_SECRET=")
                             ]
                         )
-                    print("  → Existing content preserved")
-                else:
-                    print("  → No existing .env file")
 
                 # Write the updated .env file
-                print("  → Writing new .env file...")
                 with open(env_path, "w") as _f:
                     _f.write(existing_content)
+                    # Ensure newline before adding credentials
                     if existing_content and not existing_content.endswith("\n"):
                         _f.write("\n")
                     _f.write(f"COPERNICUS_CLIENT_ID={client_id}\n")
                     _f.write(f"COPERNICUS_CLIENT_SECRET={client_secret}\n")
 
                 # Also set in current environment for immediate use
-                print("  → Setting credentials in current environment...")
+                # (so you don't need to restart the app)
                 os.environ["COPERNICUS_CLIENT_ID"] = client_id
                 os.environ["COPERNICUS_CLIENT_SECRET"] = client_secret
-                print("  → ✅ Credentials set in current environment")
 
-                save_result = "✅ Credentials saved successfully! You can now search for data."
-                print("  → ✅ Credentials saved to .env file")
+                save_result = """
+                ✅ **Credentials saved successfully!**
+
+                Your credentials are now saved in `.env` file and ready to use.
+                You can proceed to search for satellite data below.
+                """
 
             except Exception as e:
-                save_result = f"❌ Error: {str(e)}"
-                print("  → ❌ Error saving credentials:")
-                print(traceback.format_exc())
+                save_result = f"""
+                ❌ **Error saving credentials**
 
-        print("=" * 80)
-        print()
-    else:
-        print("  → Save button not clicked (value is 0)")
-        print()
+                {str(e)}
+
+                Please check file permissions and try again.
+                """
 
     # Display result message if there is one
     mo.md(save_result) if save_result else None
@@ -212,11 +230,14 @@ def _(
 
 @app.cell
 def _(mo):
-    print("📝 Rendering search parameters header...")
+    """Display section header for search parameters."""
     mo.md(
         """
     ---
     ## 🛰️ Search Parameters
+
+    Configure your search below. The default values show a small area in Luxembourg
+    as an example. You can modify any parameter to search for data in your area of interest.
     """
     )
     return
@@ -224,34 +245,74 @@ def _(mo):
 
 @app.cell
 def _(datetime, mo, timedelta):
-    print("🎨 Creating search parameter widgets...")
+    """Create search parameter input widgets.
 
+    Default values:
+    - Location: Small area in Luxembourg (6.15-6.16°E, 49.11-49.12°N)
+    - Date range: Last 30 days
+    - Satellite: Sentinel-2 (optical)
+    - Max products: 2 (to keep download size manageable)
+    """
     # Calculate default date range (last 30 days)
     default_end_date = datetime.now().strftime("%Y-%m-%d")
     default_start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-    print(f"  → Default date range: {default_start_date} to {default_end_date}")
 
-    # Create coordinate input widgets (small area in Luxembourg by default)
-    min_lon = mo.ui.number(start=-180, stop=180, step=0.01, value=6.15, label="Min Longitude")
-    min_lat = mo.ui.number(start=-90, stop=90, step=0.01, value=49.11, label="Min Latitude")
-    max_lon = mo.ui.number(start=-180, stop=180, step=0.01, value=6.16, label="Max Longitude")
-    max_lat = mo.ui.number(start=-90, stop=90, step=0.01, value=49.12, label="Max Latitude")
-    print("  → Coordinate widgets created")
+    # Coordinate inputs (bounding box)
+    # Format: [min_lon, min_lat, max_lon, max_lat]
+    min_lon = mo.ui.number(
+        start=-180,
+        stop=180,
+        step=0.01,
+        value=6.15,
+        label="Min Longitude (°E)",
+    )
+    min_lat = mo.ui.number(
+        start=-90,
+        stop=90,
+        step=0.01,
+        value=49.11,
+        label="Min Latitude (°N)",
+    )
+    max_lon = mo.ui.number(
+        start=-180,
+        stop=180,
+        step=0.01,
+        value=6.16,
+        label="Max Longitude (°E)",
+    )
+    max_lat = mo.ui.number(
+        start=-90,
+        stop=90,
+        step=0.01,
+        value=49.12,
+        label="Max Latitude (°N)",
+    )
 
-    # Create satellite and date input widgets
-    satellite_type = mo.ui.dropdown(options=["S2", "S1"], value="S2", label="Satellite Type")
+    # Satellite type selection
+    # S2 = Sentinel-2 (optical/camera-like imagery)
+    # S1 = Sentinel-1 (radar/SAR imagery, works through clouds)
+    satellite_type = mo.ui.dropdown(
+        options=["S2", "S1"],
+        value="S2",
+        label="Satellite Type (S2=Optical, S1=Radar)",
+    )
+
+    # Date range inputs
     start_date = mo.ui.date(value=default_start_date, label="Start Date")
     end_date = mo.ui.date(value=default_end_date, label="End Date")
-    max_products = mo.ui.number(start=1, stop=10, step=1, value=2, label="Max Products")
-    print("  → Satellite and date widgets created")
 
-    # Create the search button
+    # Max products to download (limited to prevent excessive downloads)
+    max_products = mo.ui.number(
+        start=1,
+        stop=10,
+        step=1,
+        value=2,
+        label="Max Products (1-10)",
+    )
+
+    # Search button triggers the search and download
     search_button = mo.ui.run_button(label="🔍 Search & Download")
 
-    print("  → Search button created")
-    print()
-
-    # Return the widgets so other cells can use them
     return (
         end_date,
         max_lat,
@@ -278,14 +339,23 @@ def _(
     search_button,
     start_date,
 ):
-    print("🎨 Displaying search parameter widgets...")
-
-    # Display all widgets in a nice layout
+    """Display search parameter widgets in a nice layout."""
     mo.vstack(
         [
-            mo.md("### Coordinates"),
+            mo.md(
+                """
+                **Bounding Box**: Define the geographic area to search.
+                Coordinates are in decimal degrees (WGS84).
+                """
+            ),
             mo.hstack([min_lon, min_lat, max_lon, max_lat]),
-            mo.md("### Satellite & Dates"),
+            mo.md(
+                """
+                **Satellite & Time Range**: Choose satellite type and date range.
+                - **S2 (Sentinel-2)**: Optical imagery, 10m resolution, affected by clouds
+                - **S1 (Sentinel-1)**: Radar imagery, 10m resolution, works through clouds
+                """
+            ),
             mo.hstack([satellite_type, start_date, end_date, max_products]),
             search_button,
         ]
@@ -308,61 +378,72 @@ def _(
     start_date,
     traceback,
 ):
-    print("🔄 SEARCH CELL - Checking if search button was clicked...")
-    print(f"  → search_button.value = {search_button.value}")
+    """Search for and download satellite data when Search button is clicked.
 
-    # Initialize variables
+    This cell:
+    1. Validates that credentials are configured
+    2. Initializes the Copernicus client
+    3. Searches for products matching the criteria
+    4. Downloads the products to data/cache/copernicus/
+    5. Returns list of downloaded file paths for visualization
+
+    The search uses different parameters for S1 vs S2:
+    - S2: Filters by cloud cover (<30%), uses L2A processing level
+    - S1: Filters by polarization (VV+VH), uses GRD product type
+    """
     download_result = ""
     downloaded_files = []
 
-    # Check if search button was clicked (value > 0)
+    # Only process if search button was clicked
     if search_button.value:
-        print("\n" + "=" * 80)
-        print("🔍 SEARCH BUTTON CLICKED - Starting search process")
-        print("=" * 80)
-        print(f"  → Credentials configured: {credentials_configured}")
-
         # First check: Do we have credentials?
         if not credentials_configured:
-            download_result = "❌ Please configure credentials first!"
-            print("  → ❌ Credentials not configured - aborting search")
-            print("=" * 80)
-            print()
-        else:
-            print("  → ✅ Credentials are configured, proceeding...")
+            download_result = """
+            ❌ **Credentials Required**
 
-            # Show spinner while processing
+            Please configure your Copernicus credentials above before searching.
+            """
+        else:
+            # Show spinner while processing (can take 30s-2min for downloads)
             with mo.status.spinner(title="Searching and downloading...") as _spinner:
                 try:
                     # Import the Copernicus client
-                    _spinner.update(title="Importing libraries and downloading Products...")
-                    print("\n  → 📦 Importing CopernicusClient...")
+                    _spinner.update(title="Initializing Copernicus client...")
                     from src.data.copernicus import CopernicusClient
 
-                    print("  → ✅ Import successful")
-
-                    # Get search parameters
+                    # Get search parameters from widgets
                     _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
-                    print(f"\n  → 📍 BBox: {_bbox}")
-                    print(f"  → 🛰️  Satellite: {satellite_type.value}")
-                    print(f"  → 📅 Date range: {start_date.value} to {end_date.value}")
-                    print(f"  → 🔢 Max products: {max_products.value}")
 
-                    # Initialize the client
-                    _spinner.update(title="Initializing Copernicus client...")
-                    print("\n  → � Initializing CopernicusClient...")
+                    # Validate bounding box
+                    if _bbox[0] >= _bbox[2] or _bbox[1] >= _bbox[3]:
+                        download_result = """
+                        ❌ **Invalid Bounding Box**
+
+                        Min longitude must be less than max longitude.
+                        Min latitude must be less than max latitude.
+                        """
+                        raise ValueError("Invalid bounding box")
+
+                    # Initialize the client (handles OAuth2 authentication)
                     client = CopernicusClient()
-                    print("  → ✅ Client initialized successfully")
 
                     # Build initial result message
-                    download_result = f"🔍 Searching for {satellite_type.value} products...\n"
-                    download_result += f"� Area: {_bbox}\n"
-                    download_result += f"📅 {start_date.value} to {end_date.value}\n\n"
+                    download_result = f"""
+                    ### 🔍 Searching for {satellite_type.value} products
+
+                    **Area**: {_bbox[0]:.3f}°E to {_bbox[2]:.3f}°E, {_bbox[1]:.3f}°N to {_bbox[3]:.3f}°N
+                    **Dates**: {start_date.value} to {end_date.value}
+                    **Max products**: {max_products.value}
+
+                    """
 
                     # Call appropriate fetch method based on satellite type
                     if satellite_type.value == "S2":
                         _spinner.update(title="Searching for Sentinel-2 products...")
-                        print("\n  → 🛰️  Calling fetch_s2()...")
+                        # Sentinel-2 parameters:
+                        # - resolution: 10m (highest resolution for RGB bands)
+                        # - max_cloud_cover: 30% (filter out very cloudy images)
+                        # - product_type: S2MSI2A (Level-2A = atmospherically corrected)
                         downloaded_files = client.fetch_s2(
                             bbox=_bbox,
                             start_date=str(start_date.value),
@@ -374,12 +455,12 @@ def _(
                             interactive=False,
                             max_products=max_products.value,
                         )
-                        print(
-                            f"  → ✅ fetch_s2() returned {len(downloaded_files) if downloaded_files else 0} files"
-                        )
                     else:
                         _spinner.update(title="Searching for Sentinel-1 products...")
-                        print("\n  → 🛰️  Calling fetch_s1()...")
+                        # Sentinel-1 parameters:
+                        # - product_type: GRD (Ground Range Detected = processed SAR)
+                        # - polarization: VV,VH (dual-pol for better feature detection)
+                        # - orbit_direction: ASCENDING (consistent viewing geometry)
                         downloaded_files = client.fetch_s1(
                             bbox=_bbox,
                             start_date=str(start_date.value),
@@ -390,35 +471,50 @@ def _(
                             download_data=True,
                             max_products=max_products.value,
                         )
-                        print(
-                            f"  → ✅ fetch_s1() returned {len(downloaded_files) if downloaded_files else 0} files"
-                        )
 
                     # Check if we got any files
-                    if downloaded_files:
+                    if downloaded_files and len(downloaded_files) > 0:
                         _spinner.update(title="Download complete!")
-                        print(f"\n  → ✅ SUCCESS: Downloaded {len(downloaded_files)} products")
-                        download_result += f"✅ Downloaded {len(downloaded_files)} products!\n\n"
-                        download_result += "📁 Files:\n"
+                        download_result += f"""
+                        ✅ **Downloaded {len(downloaded_files)} product(s)!**
+
+                        Files are cached in `data/cache/copernicus/` for future use.
+
+                        **Downloaded files:**
+                        """
                         for _f in downloaded_files:
-                            download_result += f"  • {_f}\n"
-                            print(f"     - {_f}")
+                            # Show just the filename, not full path
+                            download_result += f"\n- `{_f.name}`"
                     else:
-                        print("\n  → ⚠️  No products found for this search")
-                        download_result += "⚠️ No products found."
+                        download_result += """
+                        ⚠️ **No products found**
 
+                        Try adjusting your search parameters:
+                        - Expand the date range
+                        - Try a different location
+                        - For S2, try a different time of year (less clouds)
+                        """
+
+                except ValueError:
+                    # Validation error (already set download_result above)
+                    pass
                 except Exception as e:
-                    # Handle any errors that occurred
-                    error_details = traceback.format_exc()
-                    download_result = f"❌ Error: {str(e)}\n\nSee console for details."
-                    print("\n  → ❌ ERROR occurred:")
-                    print(error_details)
+                    # Handle any other errors
+                    _error_msg = str(e)
+                    download_result = f"""
+                    ❌ **Error during search/download**
 
-        print("=" * 80)
-        print()
-    else:
-        print("  → Search button not clicked (value is 0 or None)")
-        print()
+                    {_error_msg}
+
+                    **Common issues:**
+                    - Check your internet connection
+                    - Verify your credentials are correct
+                    - Try a smaller area or fewer products
+                    - Check console for detailed error trace
+                    """
+                    # Print full traceback to console for debugging
+                    print("Error details:")
+                    print(traceback.format_exc())
 
     # Display the result message
     mo.md(download_result) if download_result else None
@@ -436,133 +532,113 @@ def _(
     satellite_type,
     traceback,
 ):
-    print("=" * 80)
-    print("🔄 VISUALIZATION CELL - Checking if there are files to visualize...")
-    print("=" * 80)
-    print(f"  → Number of downloaded files: {len(downloaded_files) if downloaded_files else 0}")
+    """Visualize downloaded satellite imagery.
 
-    if downloaded_files:
-        print("  → Downloaded files list:")
-        for idx, _f in enumerate(downloaded_files):
-            print(f"     [{idx}] {_f}")
-            print(f"         Type: {type(_f)}")
-            print(f"         Exists: {_f.exists() if hasattr(_f, 'exists') else 'N/A'}")
+    This cell:
+    1. Checks if there are downloaded files to visualize
+    2. Imports visualization functions
+    3. Creates matplotlib subplots (max 2 images side-by-side)
+    4. Calls appropriate visualization function (S2=RGB, S1=SAR)
+    5. Displays the resulting figure
 
-    # Initialize result
+    Visualization details:
+    - S2: RGB composite (natural color) with target bbox overlay
+    - S1: VV polarization (grayscale) with adaptive contrast
+    - Both: Cropped to target bbox for focused view
+    """
     viz_result = None
 
     # Only visualize if we have downloaded files
-    if downloaded_files:
-        print(f"\n  → 🎨 Starting visualization for {len(downloaded_files)} files...")
-
+    if downloaded_files and len(downloaded_files) > 0:
         try:
             # Import visualization libraries
-            print("  → Importing matplotlib and visualization functions...")
             import matplotlib.pyplot as plt
 
             from src.data.copernicus import display_sar_image, display_satellite_image
 
-            print("  → ✅ Imports successful")
-
-            # Get bbox for cropping
+            # Get bbox for cropping and overlay
             _viz_bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
-            num_files = min(len(downloaded_files), 2)  # Max 2 images
-            print(f"  → Visualizing {num_files} files")
-            print(f"  → Target bbox: {_viz_bbox}")
-            print(f"  → Satellite type: {satellite_type.value}")
 
-            # Create subplot grid
-            print("\n  → Creating matplotlib figure...")
+            # Limit to 2 images to keep visualization manageable
+            num_files = min(len(downloaded_files), 2)
+
+            # Create subplot grid (1 row, up to 2 columns)
             fig, axes = plt.subplots(1, num_files, figsize=(12, 6))
             if num_files == 1:
-                axes = [axes]  # Make it a list for consistency
-            print(f"  → ✅ Figure created with {num_files} subplot(s)")
-            print(f"  → Figure size: {fig.get_size_inches()}")
-            print(f"  → Axes type: {type(axes)}, length: {len(axes)}")
+                axes = [axes]  # Make it a list for consistent indexing
 
             # Render each file
             for idx, file_path in enumerate(downloaded_files[:num_files]):
-                print(f"\n  → {'='*60}")
-                print(f"  → Rendering file {idx+1}/{num_files}")
-                print(f"  → {'='*60}")
-                print(f"  → File path: {file_path}")
-                print(f"  → File type: {type(file_path)}")
-                print(f"  → Axes[{idx}]: {axes[idx]}")
-
                 if satellite_type.value == "S2":
-                    print("    → Calling display_satellite_image (RGB)...")
-                    print(f"    → Parameters: file={file_path}, bbox={_viz_bbox}, ax={axes[idx]}")
-
+                    # Sentinel-2: Display RGB composite
+                    # This extracts B04 (Red), B03 (Green), B02 (Blue) bands
+                    # and creates a natural color image
                     result_ax = display_satellite_image(file_path, _viz_bbox, ax=axes[idx])
 
-                    print(f"    → display_satellite_image returned: {result_ax}")
-                    print(f"    → Return type: {type(result_ax)}")
-
                     if result_ax is None:
-                        print("    → ⚠️  WARNING: display_satellite_image returned None!")
-                        print("    → This means RGB extraction likely failed")
-                        # Add a text message to the plot
+                        # Visualization failed (e.g., corrupt file, missing bands)
                         axes[idx].text(
                             0.5,
                             0.5,
-                            "Image extraction failed",
+                            "⚠️ Image extraction failed\n\nFile may be corrupt or incomplete",
                             ha="center",
                             va="center",
                             transform=axes[idx].transAxes,
+                            fontsize=12,
                         )
-                    else:
-                        print(f"    → ✅ Image rendered successfully on axes {idx}")
+                        axes[idx].set_title(f"Product {idx+1}: Error")
                 else:
-                    print("    → Calling display_sar_image (VV polarization)...")
-                    print(f"    → Parameters: file={file_path}, bbox={_viz_bbox}, ax={axes[idx]}")
-
+                    # Sentinel-1: Display SAR image (VV polarization)
+                    # VV = Vertical transmit, Vertical receive
+                    # Good for water detection, urban areas, soil moisture
                     result_ax = display_sar_image(
                         file_path, _viz_bbox, ax=axes[idx], polarization="VV"
                     )
 
-                    print(f"    → display_sar_image returned: {result_ax}")
-                    print(f"    → Return type: {type(result_ax)}")
-
                     if result_ax is None:
-                        print("    → ⚠️  WARNING: display_sar_image returned None!")
-                        print("    → This means SAR extraction likely failed")
+                        # Visualization failed
                         axes[idx].text(
                             0.5,
                             0.5,
-                            "SAR extraction failed",
+                            "⚠️ SAR extraction failed\n\nFile may be corrupt or incomplete",
                             ha="center",
                             va="center",
                             transform=axes[idx].transAxes,
+                            fontsize=12,
                         )
-                    else:
-                        print(f"    → ✅ SAR image rendered successfully on axes {idx}")
+                        axes[idx].set_title(f"Product {idx+1}: Error")
 
-            print("\n  → Applying tight_layout...")
+            # Adjust spacing between subplots
             plt.tight_layout()
 
-            print("  → Setting viz_result to figure...")
+            # Set result to figure for Marimo to display
             viz_result = fig
-            print(f"  → viz_result type: {type(viz_result)}")
-            print(f"  → viz_result value: {viz_result}")
-            print("  → ✅ Visualization complete")
 
         except Exception as e:
-            # Handle visualization errors
-            error_msg = f"Visualization error: {str(e)}"
-            print("\n  → ❌ EXCEPTION CAUGHT:")
-            print(f"  → Error message: {error_msg}")
-            print("  → Full traceback:")
-            print(traceback.format_exc())
+            # Handle visualization errors gracefully
+            _error_msg = str(e)
             viz_result = mo.md(
-                f"## ❌ Visualization Error\n\n```\n{error_msg}\n\n{traceback.format_exc()}\n```"
-            )
-    else:
-        print("  → No files to visualize (downloaded_files is empty or None)")
+                f"""
+                ## ❌ Visualization Error
 
-    print("=" * 80)
-    print()
+                Failed to visualize the downloaded imagery.
+
+                **Error**: {_error_msg}
+
+                **Possible causes:**
+                - Corrupt or incomplete download
+                - Missing required bands in the product
+                - Insufficient memory for large images
+
+                Check the console for detailed error information.
+                """
+            )
+            # Print full traceback to console for debugging
+            print("Visualization error details:")
+            print(traceback.format_exc())
 
     # Return the figure for Marimo to display
+    # (None if no files to visualize)
     viz_result
     return
 
