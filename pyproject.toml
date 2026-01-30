@@ -34,7 +34,7 @@ dependencies = [
     "geopandas==0.14.3",
     "fiona==1.9.6",
     "geobench==1.0.0",
-    "h5py==3.10.0",
+    "h5py==3.15.1",
     "scikit-learn==1.4.1.post1",
     "requests>=2.31.0",
     "types-requests",
