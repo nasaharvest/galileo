@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "wandb==0.16.3",
     "numpy==1.26.4",
-    "einops==0.7.0",
+    "einops==0.8.1",
     "torch==2.2.1",
     "torchvision==0.17.1",
     "earthengine-api==0.1.391",
