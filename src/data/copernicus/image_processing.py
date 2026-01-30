@@ -87,11 +87,13 @@ def extract_rgb_composite(
             # Find band files
             band_files = {}
             for band in bands:
-                # Try multiple naming patterns
+                # Try multiple naming patterns with recursive search
                 patterns = [
-                    f"*_{band}_10m.jp2",  # Standard pattern
-                    f"*_{band}.jp2",  # Alternative pattern
-                    f"*{band}.jp2",  # Simple pattern
+                    f"**/*_{band}_10m.jp2",  # Standard pattern in R10m subdirectory
+                    f"**/*_{band}.jp2",  # Alternative pattern
+                    f"**/*{band}.jp2",  # Simple pattern
+                    f"*_{band}_10m.jp2",  # Direct in IMG_DATA (legacy)
+                    f"*_{band}.jp2",  # Alternative direct
                 ]
 
                 for pattern in patterns:
@@ -580,10 +582,8 @@ def extract_sar_composite(
                             # In dB: -40 dB to +10 dB
                             band_data_db = 10 * np.log10(band_data + 1e-10)
 
-                            # Clip extreme values for better visualization
-                            # Values below -30 dB are typically noise
-                            # Values above +10 dB are rare (very strong scatterers)
-                            band_data_db = np.clip(band_data_db, -30, 10)
+                            # Don't clip here - let visualization handle the range
+                            # Different products may have different value ranges
                             sar_bands.append(band_data_db)
                         else:
                             sar_bands.append(band_data)

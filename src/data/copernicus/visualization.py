@@ -445,7 +445,37 @@ def display_sar_image(
     # Display the SAR image
     # Bounds define the geographic extent of the image
     bounds = sar_data["bounds_wgs84"]
-    extent = (bounds[0], bounds[2], bounds[1], bounds[3])  # (min_lon, max_lon, min_lat, max_lat)
+
+    # If bounds are available, use geographic coordinates
+    # Otherwise, use pixel coordinates
+    if bounds is not None:
+        extent = (
+            bounds[0],
+            bounds[2],
+            bounds[1],
+            bounds[3],
+        )  # (min_lon, max_lon, min_lat, max_lat)
+    else:
+        # No CRS info - use pixel coordinates
+        # This happens with some S1 GRD products where CRS isn't embedded in GeoTIFF
+        extent = None
+        print("Warning: No geographic bounds available, using pixel coordinates")
+
+    # Use adaptive display range based on valid data percentiles
+    # Exclude invalid/no-data pixels (typically -100 dB or very low values)
+    valid_mask = sar_image > -50  # Exclude noise/no-data pixels
+    valid_data = sar_image[valid_mask]
+
+    if len(valid_data) > 0:
+        # Use 5th-95th percentile for better contrast
+        vmin_val = np.percentile(valid_data, 5)
+        vmax_val = np.percentile(valid_data, 95)
+    else:
+        # Fallback if no valid data
+        vmin_val = np.min(sar_image)
+        vmax_val = np.max(sar_image)
+
+    print(f"SAR display range: {vmin_val:.1f} to {vmax_val:.1f} dB")
 
     # Display with appropriate colormap
     # vmin/vmax set the display range for dB values
@@ -454,15 +484,15 @@ def display_sar_image(
         extent=extent,
         aspect="auto",
         cmap=cmap,
-        vmin=-25,  # Typical minimum for visualization (very dark)
-        vmax=0,  # Typical maximum for visualization (bright)
+        vmin=vmin_val,
+        vmax=vmax_val,
     )
 
     # Add colorbar to show backscatter scale
     plt.colorbar(im, ax=ax, label=f"{polarization} Backscatter (dB)")
 
-    # Add target area overlay if provided
-    if target_bbox is not None:
+    # Add target area overlay if provided and bounds are available
+    if target_bbox is not None and bounds is not None:
         bbox_lons = [
             target_bbox[0],
             target_bbox[2],
@@ -485,8 +515,12 @@ def display_sar_image(
         ax.set_ylim(target_bbox[1] - padding, target_bbox[3] + padding)
 
     # Customize plot
-    ax.set_xlabel("Longitude (°E)", fontsize=12)
-    ax.set_ylabel("Latitude (°N)", fontsize=12)
+    if bounds is not None:
+        ax.set_xlabel("Longitude (°E)", fontsize=12)
+        ax.set_ylabel("Latitude (°N)", fontsize=12)
+    else:
+        ax.set_xlabel("X (pixels)", fontsize=12)
+        ax.set_ylabel("Y (pixels)", fontsize=12)
 
     if title is None:
         # Create informative title with key metadata
