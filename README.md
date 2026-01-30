@@ -82,7 +82,7 @@ uv run marimo run copernicus_marimo.py
 **Get free Copernicus credentials:**
 1. Visit https://dataspace.copernicus.eu/
 2. Register (no credit card required)
-3. Go to "User Settings" → "API Credentials"
+3. Go to your account settings at: https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings
 4. Copy your Client ID and Client Secret
 
 The GUI will guide you through credential setup and data download.

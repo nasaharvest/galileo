@@ -44,10 +44,11 @@ def _(mo):
     ## Getting Started
 
     **Get free Copernicus credentials:**
-    - Visit: https://dataspace.copernicus.eu/
-    - Click "Register" (no credit card required)
-    - After registration, go to "User Settings" → "API Credentials"
-    - Copy your Client ID and Client Secret below
+    1. Visit: https://dataspace.copernicus.eu/
+    2. Click "Register" (no credit card required)
+    3. After registration, go to your account settings at:
+       **https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings**
+    4. Copy your Client ID and Client Secret below
 
     **About the satellites:**
     - **Sentinel-2 (S2)**: Optical imagery (like a camera), best for seeing colors, vegetation, water
@@ -119,8 +120,9 @@ def _(credentials_configured, mo):
             Please enter your Copernicus API credentials below.
             These will be saved securely in a `.env` file.
 
-            **Don't have credentials yet?** Register for free at:
-            https://dataspace.copernicus.eu/
+            **Don't have credentials yet?**
+            1. Register for free at: https://dataspace.copernicus.eu/
+            2. Get your credentials at: https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings
             """
         )
 
