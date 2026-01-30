@@ -47,9 +47,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.2.0",
-    "mypy==1.8.0",
-    "coverage==7.4.0",
+    "ruff==0.14.13",
+    "mypy==1.19.1",
+    "coverage==7.13.1",
     "pre-commit==3.6.0",
     "marimo",
 ]
