@@ -57,6 +57,13 @@ def extract_rgb_composite(
     if bands is None:
         bands = ["B04", "B03", "B02"]  # Red, Green, Blue for natural color
 
+    # Validate that exactly 3 bands are provided for RGB composite
+    if len(bands) != 3:
+        raise ValueError(
+            f"RGB composite requires exactly 3 bands, but {len(bands)} were provided: {bands}. "
+            f"For RGB, use bands like ['B04', 'B03', 'B02'] (Red, Green, Blue)."
+        )
+
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -124,6 +131,11 @@ def extract_rgb_composite(
                         rgb_bands.append(band_data)
 
             if len(rgb_bands) != len(bands):
+                print(
+                    f"Error: Failed to read all bands from {zip_file_path.name}. "
+                    f"Expected {len(bands)} bands {bands}, but only read {len(rgb_bands)}. "
+                    f"This may indicate corrupted band files or rasterio read errors."
+                )
                 return None
 
             # Stack bands into RGB array
@@ -263,6 +275,13 @@ def create_false_color_composite(
     if bands is None:
         bands = ["B08", "B04", "B03"]  # NIR, Red, Green for vegetation
 
+    # Validate that exactly 3 bands are provided for false color composite
+    if len(bands) != 3:
+        raise ValueError(
+            f"False color composite requires exactly 3 bands, but {len(bands)} were provided: {bands}. "
+            f"For false color, use bands like ['B08', 'B04', 'B03'] (NIR, Red, Green)."
+        )
+
     return extract_rgb_composite(zip_file_path, bands=bands, normalize=True)
 
 
@@ -313,7 +332,6 @@ def crop_to_bbox(
     image_array: np.ndarray,
     image_bounds: Tuple[float, float, float, float],
     target_bbox: List[float],
-    image_crs: str = "EPSG:4326",
 ) -> Optional[np.ndarray]:
     """Crop satellite image to user's requested bounding box.
 
@@ -348,8 +366,6 @@ def crop_to_bbox(
                      in WGS84 coordinates (degrees)
         target_bbox: User's requested area [min_lon, min_lat, max_lon, max_lat]
                     in WGS84 coordinates (degrees)
-        image_crs: Coordinate reference system of the image
-                  Default: "EPSG:4326" (WGS84 lat/lon)
 
     Returns:
         Cropped image array containing only the requested area
