@@ -13,6 +13,8 @@ from typing import Dict, Optional
 import numpy as np
 import rasterio
 
+from .utils import find_granule_directory
+
 
 def _extract_band(zip_file_path: Path, band_name: str) -> Optional[np.ndarray]:
     """Extract a single band from Sentinel-2 ZIP file.
@@ -38,13 +40,12 @@ def _extract_band(zip_file_path: Path, band_name: str) -> Optional[np.ndarray]:
                 return None
 
             safe_dir = safe_dirs[0]
-            img_data_dir = safe_dir / "GRANULE"
-            granule_dirs = list(img_data_dir.glob("*"))
 
-            if not granule_dirs:
+            # Find granule directory
+            granule_dir = find_granule_directory(safe_dir, zip_file_path.name)
+            if granule_dir is None:
                 return None
 
-            granule_dir = granule_dirs[0]
             img_dir = granule_dir / "IMG_DATA"
 
             # Try multiple naming patterns

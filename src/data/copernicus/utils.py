@@ -198,3 +198,44 @@ def bbox_to_wkt(bbox: List[float]) -> str:
         f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, "
         f"{max_lon} {max_lat}, {min_lon} {max_lat}, {min_lon} {min_lat}))"
     )
+
+
+def find_granule_directory(safe_dir: Path, zip_filename: str) -> Path | None:
+    """Find the granule directory within a Sentinel-2 SAFE directory structure.
+
+    Sentinel-2 products follow the SAFE (Standard Archive Format for Europe) structure:
+    - *.SAFE/
+      - GRANULE/
+        - L1C_T31UGQ_A012345_20220101T123456/  (granule directory)
+          - IMG_DATA/  (contains the actual band files)
+          - QI_DATA/   (quality information)
+          - ...
+
+    This function navigates this structure to find the granule directory, which contains
+    the IMG_DATA folder with the actual satellite imagery bands.
+
+    Args:
+        safe_dir: Path to the SAFE directory (e.g., "S2A_MSIL1C_20220101T123456.SAFE")
+        zip_filename: Name of the ZIP file (used for error messages)
+
+    Returns:
+        Path to the granule directory if found, None otherwise
+
+    Example:
+        >>> safe_dir = Path("S2A_MSIL1C_20220101T123456.SAFE")
+        >>> granule_dir = find_granule_directory(safe_dir, "product.zip")
+        >>> if granule_dir:
+        ...     img_data = granule_dir / "IMG_DATA"
+    """
+    # Navigate to GRANULE directory
+    img_data_dir = safe_dir / "GRANULE"
+
+    # Find all subdirectories (should be exactly one granule directory)
+    granule_dirs = list(img_data_dir.glob("*"))
+
+    if not granule_dirs:
+        print(f"No granule directories found in {zip_filename}")
+        return None
+
+    # Return the first (and typically only) granule directory
+    return granule_dirs[0]

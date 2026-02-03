@@ -12,6 +12,8 @@ from typing import Optional
 import numpy as np
 import rasterio
 
+from .utils import find_granule_directory
+
 
 def extract_cloud_mask(zip_file_path: Path) -> Optional[np.ndarray]:
     """Extract cloud mask from Sentinel-2 Scene Classification Layer (SCL).
@@ -86,15 +88,10 @@ def extract_cloud_mask(zip_file_path: Path) -> Optional[np.ndarray]:
                 )
                 return None
 
-            # Find IMG_DATA directory
-            img_data_dir = safe_dir / "GRANULE"
-            granule_dirs = list(img_data_dir.glob("*"))
-
-            if not granule_dirs:
-                print(f"No granule directories found in {zip_file_path.name}")
+            # Find granule directory
+            granule_dir = find_granule_directory(safe_dir, zip_file_path.name)
+            if granule_dir is None:
                 return None
-
-            granule_dir = granule_dirs[0]
 
             # SCL band is in IMG_DATA/R20m/ subdirectory (20m resolution)
             img_dir_20m = granule_dir / "IMG_DATA" / "R20m"
