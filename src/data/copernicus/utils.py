@@ -9,9 +9,12 @@ This module contains helper functions used throughout the Copernicus data fetchi
 
 import hashlib
 import re
+import tempfile
+import zipfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Tuple, Union
+from typing import Any, Generator, List, Tuple, Union
 
 from shapely.geometry import Polygon, box
 
@@ -279,3 +282,55 @@ def find_granule_directory(safe_dir: Path, zip_filename: str) -> Path | None:
 
     # Return the first (and typically only) granule directory
     return granule_dirs[0]
+
+
+@contextmanager
+def extract_s2_safe_structure(
+    zip_file_path: Path,
+) -> Generator[Tuple[Path, Path], None, None]:
+    """Extract Sentinel-2 ZIP and provide access to SAFE directory structure.
+
+    This context manager handles the common pattern of:
+    1. Creating a temporary directory
+    2. Extracting the Sentinel-2 ZIP file
+    3. Finding the SAFE directory
+    4. Finding the granule directory
+    5. Cleaning up on exit
+
+    This consolidates code that was duplicated across quality.py, indices.py,
+    and image_processing.py.
+
+    Args:
+        zip_file_path: Path to Sentinel-2 ZIP file
+
+    Yields:
+        Tuple of (safe_dir, granule_dir) Path objects
+
+    Raises:
+        FileNotFoundError: If SAFE directory or granule directory not found
+
+    Example:
+        >>> with extract_s2_safe_structure(zip_path) as (safe_dir, granule_dir):
+        ...     img_data = granule_dir / "IMG_DATA"
+        ...     # Process bands...
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Extract ZIP file
+        with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
+            zip_ref.extractall(temp_path)
+
+        # Find SAFE directory
+        safe_dirs = list(temp_path.glob("*.SAFE"))
+        if not safe_dirs:
+            raise FileNotFoundError(f"No SAFE directory found in {zip_file_path.name}")
+
+        safe_dir = safe_dirs[0]
+
+        # Find granule directory
+        granule_dir = find_granule_directory(safe_dir, zip_file_path.name)
+        if granule_dir is None:
+            raise FileNotFoundError(f"No granule directory found in {zip_file_path.name}")
+
+        yield safe_dir, granule_dir
