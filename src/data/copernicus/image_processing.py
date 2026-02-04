@@ -56,8 +56,10 @@ def extract_rgb_composite(
 
         Returns None if extraction fails.
     """
+    from .enums import S2Band
+
     if bands is None:
-        bands = ["B04", "B03", "B02"]  # Red, Green, Blue for natural color
+        bands = S2Band.rgb_bands()  # Red, Green, Blue for natural color
 
     # Validate that exactly 3 bands are provided for RGB composite
     if len(bands) != 3:
@@ -275,8 +277,10 @@ def create_false_color_composite(
     Returns:
         Same format as extract_rgb_composite but with false color bands
     """
+    from .enums import S2Band
+
     if bands is None:
-        bands = ["B08", "B04", "B03"]  # NIR, Red, Green for vegetation
+        bands = S2Band.false_color_bands()  # NIR, Red, Green for vegetation
 
     # Validate that exactly 3 bands are provided for false color composite
     if len(bands) != 3:
