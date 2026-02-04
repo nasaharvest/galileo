@@ -31,6 +31,23 @@ class CopernicusClient:
 
     The client uses the free Copernicus Data Space Ecosystem API, which replaced
     the old Copernicus Open Access Hub in 2023.
+
+    The client can be used as a context manager to ensure proper cleanup of HTTP sessions:
+
+    Example:
+        >>> with CopernicusClient() as client:
+        ...     products = client.fetch_s2(
+        ...         bbox=[25.6796, -27.6721, 25.6897, -27.663],
+        ...         start_date="2022-01-01",
+        ...         end_date="2022-01-31"
+        ...     )
+
+    Or used directly (remember to call close() when done):
+
+    Example:
+        >>> client = CopernicusClient()
+        >>> products = client.fetch_s2(bbox, start_date, end_date)
+        >>> client.close()  # Clean up when done
     """
 
     # API endpoints for Copernicus Data Space Ecosystem
@@ -459,3 +476,38 @@ class CopernicusClient:
             download_data=download_data,
             max_products=max_products,
         )
+
+    def close(self) -> None:
+        """Close the HTTP session and clean up resources.
+
+        This method should be called when you're done using the client to ensure
+        the HTTP session is properly closed and connections are released.
+
+        It's automatically called when using the client as a context manager.
+        """
+        if self.session:
+            self.session.close()
+
+    def __enter__(self) -> "CopernicusClient":
+        """Enter the context manager.
+
+        Returns:
+            self: The client instance for use in the with block.
+
+        Example:
+            >>> with CopernicusClient() as client:
+            ...     products = client.fetch_s2(bbox, start_date, end_date)
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit the context manager and clean up resources.
+
+        This ensures the HTTP session is properly closed even if an exception occurs.
+
+        Args:
+            exc_type: Exception type if an exception was raised, None otherwise
+            exc_val: Exception value if an exception was raised, None otherwise
+            exc_tb: Exception traceback if an exception was raised, None otherwise
+        """
+        self.close()

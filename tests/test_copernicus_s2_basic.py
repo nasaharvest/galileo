@@ -251,6 +251,53 @@ class TestCopernicusClient(unittest.TestCase):
                 end_date="2022-01-01",  # End before start
             )
 
+    @patch.dict(
+        "os.environ",
+        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
+    )
+    def test_context_manager(self):
+        """Test that client works as a context manager."""
+        with CopernicusClient(load_dotenv_file=False) as client:
+            self.assertIsNotNone(client)
+            self.assertIsNotNone(client.session)
+            self.assertEqual(client.client_id, "test_id")
+
+        # Session should be closed after exiting context
+        # Note: We can't easily test if session is closed without accessing private attributes
+
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1],  # Too few elements
+                start_date="2022-01-01",
+                end_date="2022-12-31",
+            )
+
+        # Invalid resolution
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1, 1],
+                start_date="2022-01-01",
+                end_date="2022-12-31",
+                resolution=15,  # Invalid resolution
+            )
+
+        # Invalid cloud cover
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1, 1],
+                start_date="2022-01-01",
+                end_date="2022-12-31",
+                max_cloud_cover=150,  # Out of range
+            )
+
+        # Invalid date range
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1, 1],
+                start_date="2022-12-31",
+                end_date="2022-01-01",  # End before start
+            )
+
 
 class TestS2SearchQuery(unittest.TestCase):
     """Test S2 search query construction."""
