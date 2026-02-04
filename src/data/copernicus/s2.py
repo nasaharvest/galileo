@@ -15,6 +15,13 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from .common import (
+    apply_product_limit,
+    check_cache,
+    process_products,
+    save_cache,
+    show_download_confirmation,
+)
 from .utils import bbox_to_wkt, build_cache_key, sanitize_filename
 
 # Use TYPE_CHECKING to avoid circular imports while still getting type hints
@@ -86,18 +93,9 @@ def fetch_s2_products(
     cache_file = client.cache_dir / f"{cache_key}.json"
 
     # Check if we already have cached results for this exact request
-    if cache_file.exists():
-        print(f"Loading S2 products from cache: {cache_file}")
-        with open(cache_file) as f:
-            cached_data: Dict[str, Any] = json.load(f)
-
-        # Verify that all cached files still exist on disk
-        cached_paths: List[Path] = [Path(p) for p in cached_data["file_paths"]]
-        if all(p.exists() for p in cached_paths):
-            return cached_paths  # Cache hit - return existing results
-        else:
-            print("Some cached files missing, re-downloading...")
-            # Fall through to re-fetch the data
+    cached_paths = check_cache(cache_file)
+    if cached_paths is not None:
+        return cached_paths
 
     # Also check for cache with different download_data setting
     # This allows us to reuse product searches but change download behavior
@@ -141,73 +139,28 @@ def fetch_s2_products(
     print(f"Found {len(products)} S2 products")
 
     # Apply max_products limit if specified
-    # This prevents accidental huge downloads (each product is 500MB-1GB)
-    products_to_process = products
-    if max_products is not None and len(products) > max_products:
-        print(f"⚠️  Limiting to first {max_products} products (found {len(products)} total)")
-        print("   To download more, use max_products parameter:")
-        print(f"   client.fetch_s2(..., max_products={len(products)})")
-        products_to_process = products[:max_products]
+    products_to_process = apply_product_limit(products, max_products, "S2")
 
     # Interactive user confirmation if requested
     if interactive and products_to_process:
-        print("\n🛰️ DOWNLOAD CONFIRMATION")
-        print("=" * 40)
-        print(f"Found {len(products)} Sentinel-2 products:")
-
-        for i, product in enumerate(products_to_process[:5], 1):  # Show first 5
-            name = product.get("Name", "Unknown")
-            size_mb = product.get("ContentLength", 0) / (1024 * 1024)
-            print(f"  {i}. {name} ({size_mb:.1f} MB)")
-
-        if len(products_to_process) > 5:
-            print(f"  ... and {len(products_to_process) - 5} more products")
-
-        total_size_gb = sum(p.get("ContentLength", 0) for p in products_to_process) / (1024**3)
-        print(f"\nTotal size: {total_size_gb:.2f} GB")
-
-        if download_data:
-            print("Mode: Download actual satellite imagery")
-            response = (
-                input(f"\nDownload {len(products_to_process)} products? [Y/n]: ").strip().lower()
-            )
-            if response and response not in ["y", "yes"]:
-                print("Download cancelled by user")
-                return []
-        else:
-            print("Mode: Metadata only (no actual imagery download)")
+        if not show_download_confirmation(products_to_process, download_data, "Sentinel-2"):
+            return []
 
     # Process products (download or create metadata)
-    downloaded_paths: List[Path] = []
-
-    if download_data:
-        print("\n📥 DOWNLOADING SATELLITE IMAGERY")
-        print("=" * 45)
-
-        for i, product in enumerate(products_to_process, 1):
-            print(f"\n🛰️ Downloading product {i}/{len(products_to_process)}")
-
-            downloaded_file = _download_s2_product(client, product, resolution, i - 1)
-            if downloaded_file:
-                downloaded_paths.append(downloaded_file)
-                print(f"✅ Downloaded: {downloaded_file.name}")
-            else:
-                print(f"❌ Failed to download product {i}")
-    else:
-        print("\n📋 CREATING METADATA FILES")
-        print("=" * 35)
-
-        # Create metadata files for the found products
-        for i, product in enumerate(products_to_process):
-            metadata_file: Optional[Path] = _create_product_metadata(
-                client, product, resolution, i
-            )
-            if metadata_file:
-                downloaded_paths.append(metadata_file)
+    downloaded_paths = process_products(
+        client=client,
+        products=products_to_process,
+        download_data=download_data,
+        satellite="SENTINEL-2",
+        download_func=_download_s2_product,
+        metadata_func=_create_product_metadata,
+        resolution=resolution,
+    )
 
     # Cache the results for future requests
-    cache_data: Dict[str, Any] = {
-        "parameters": {
+    save_cache(
+        cache_file=cache_file,
+        parameters={
             "bbox": bbox,
             "start_date": start_date,
             "end_date": end_date,
@@ -216,13 +169,9 @@ def fetch_s2_products(
             "product_type": product_type,
             "download_data": download_data,
         },
-        "products": products,  # Full product metadata from API
-        "file_paths": [str(p) for p in downloaded_paths],  # Paths to created files
-    }
-
-    # Write cache data to disk
-    with open(cache_file, "w") as f:
-        json.dump(cache_data, f, indent=2)
+        products=products,
+        file_paths=downloaded_paths,
+    )
 
     action = "Downloaded" if download_data else "Created metadata for"
     print(f"\n✅ {action} {len(downloaded_paths)} S2 products, cached to {cache_file}")
