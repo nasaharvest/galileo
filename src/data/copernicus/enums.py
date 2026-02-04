@@ -98,3 +98,13 @@ class S1AcquisitionMode(str, Enum):
     EW = "EW"  # Extra Wide swath - 400km swath, lower resolution
     SM = "SM"  # Stripmap - high resolution, narrow swath
     WV = "WV"  # Wave mode - ocean wave spectra
+
+
+class S1OrbitDirection(str, Enum):
+    """Sentinel-1 orbit direction.
+
+    The satellite's orbit direction affects viewing geometry and shadow patterns.
+    """
+
+    ASCENDING = "ASCENDING"  # Moving south to north (evening pass)
+    DESCENDING = "DESCENDING"  # Moving north to south (morning pass)

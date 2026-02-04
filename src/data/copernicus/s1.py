@@ -18,7 +18,7 @@ SAR Background:
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
 from .common import (
     apply_product_limit,
@@ -26,6 +26,7 @@ from .common import (
     process_products,
     save_cache,
 )
+from .enums import S1AcquisitionMode, S1OrbitDirection, S1Polarization, S1ProductType
 from .utils import bbox_to_wkt, build_cache_key, sanitize_filename
 
 # Use TYPE_CHECKING to avoid circular imports while still getting type hints
@@ -38,10 +39,10 @@ def fetch_s1_products(
     bbox: List[float],
     start_date: str,
     end_date: str,
-    product_type: str,
-    polarization: str,
-    orbit_direction: str,
-    acquisition_mode: str = "IW",
+    product_type: Union[str, S1ProductType],
+    polarization: Union[str, S1Polarization],
+    orbit_direction: Union[str, S1OrbitDirection],
+    acquisition_mode: Union[str, S1AcquisitionMode] = "IW",
     download_data: bool = True,
     max_products: int = 3,
 ) -> List[Path]:
@@ -61,23 +62,22 @@ def fetch_s1_products(
                    Example: "2024-01-01"
         end_date: End date in YYYY-MM-DD format
                  Example: "2024-01-31"
-        product_type: SAR product type:
-                     - "GRD": Ground Range Detected (most common, preprocessed and geocoded)
-                             Best for most applications, ready to use
-                     - "SLC": Single Look Complex (raw data in slant range geometry)
-                             Requires more processing, used for interferometry
-                     - "OCN": Ocean products (specialized for ocean wind/wave analysis)
-        polarization: Radar polarization modes (e.g., "VV,VH"):
-                     - "VV": Vertical transmit, Vertical receive (good for water, urban)
-                     - "VH": Vertical transmit, Horizontal receive (good for vegetation)
-                     - "HH": Horizontal transmit, Horizontal receive (less common)
-                     - "HV": Horizontal transmit, Vertical receive (less common)
-                     Most land applications use "VV,VH" (dual polarization)
-        orbit_direction: Satellite orbit direction:
-                        - "ASCENDING": Moving from south to north (evening pass)
-                        - "DESCENDING": Moving from north to south (morning pass)
-                        Different directions show different aspects of terrain
-        acquisition_mode: SAR acquisition mode (default: "IW")
+        product_type: SAR product type (string or S1ProductType enum):
+                     - "GRD" or S1ProductType.GRD: Ground Range Detected (most common)
+                     - "SLC" or S1ProductType.SLC: Single Look Complex (raw data)
+                     - "OCN" or S1ProductType.OCN: Ocean products
+        polarization: Radar polarization modes (string or S1Polarization enum):
+                     - "VV,VH" or S1Polarization.dual_pol_vv_vh(): Dual pol (most common)
+                     - "VV" or S1Polarization.VV: Single vertical polarization
+                     - "VH" or S1Polarization.VH: Cross polarization
+        orbit_direction: Satellite orbit direction (string or S1OrbitDirection enum):
+                        - "ASCENDING" or S1OrbitDirection.ASCENDING: South to north
+                        - "DESCENDING" or S1OrbitDirection.DESCENDING: North to south
+        acquisition_mode: SAR acquisition mode (string or S1AcquisitionMode enum, default: "IW")
+                         - "IW" or S1AcquisitionMode.IW: Interferometric Wide (default)
+                         - "EW" or S1AcquisitionMode.EW: Extra Wide
+                         - "SM" or S1AcquisitionMode.SM: Strip Map
+                         - "WV" or S1AcquisitionMode.WV: Wave Mode
 
                          WHAT IS ACQUISITION MODE:
                          Sentinel-1 SAR can operate in different imaging modes,
@@ -189,6 +189,16 @@ def fetch_s1_products(
         ... )
         >>> print(f"Downloaded {len(files)} SAR products")
     """
+    # Convert enums to strings for internal use
+    product_type_str = str(product_type.value if hasattr(product_type, "value") else product_type)
+    polarization_str = str(polarization.value if hasattr(polarization, "value") else polarization)
+    orbit_direction_str = str(
+        orbit_direction.value if hasattr(orbit_direction, "value") else orbit_direction
+    )
+    acquisition_mode_str = str(
+        acquisition_mode.value if hasattr(acquisition_mode, "value") else acquisition_mode
+    )
+
     # Build a unique cache key based on all parameters that affect the result
     # SAR products have different parameters than optical imagery
     cache_key = build_cache_key(
@@ -196,10 +206,10 @@ def fetch_s1_products(
         bbox=bbox,
         start_date=start_date,
         end_date=end_date,
-        product_type=product_type,
-        polarization=polarization,
-        orbit_direction=orbit_direction,
-        acquisition_mode=acquisition_mode,  # Include acquisition mode in cache key
+        product_type=product_type_str,
+        polarization=polarization_str,
+        orbit_direction=orbit_direction_str,
+        acquisition_mode=acquisition_mode_str,  # Include acquisition mode in cache key
         download_data=download_data,  # Include download mode in cache key
     )
 
@@ -217,10 +227,10 @@ def fetch_s1_products(
         bbox,
         start_date,
         end_date,
-        product_type,
-        polarization,
-        orbit_direction,
-        acquisition_mode,
+        product_type_str,
+        polarization_str,
+        orbit_direction_str,
+        acquisition_mode_str,
     )
 
     # Handle case where no products were found
