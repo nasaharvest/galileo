@@ -294,8 +294,8 @@ def _extract_cloud_cover(product: Dict[str, Any]) -> Optional[float]:
 def _create_product_metadata(
     client: "CopernicusClient",
     product: Dict[str, Any],
-    resolution: int,
     index: int,
+    **kwargs: Any,
 ) -> Optional[Path]:
     """Create a metadata file for a Sentinel-2 product instead of downloading the full product.
 
@@ -306,12 +306,15 @@ def _create_product_metadata(
     Args:
         client: CopernicusClient for accessing cache directory
         product: Product dictionary from the API search results
-        resolution: Requested resolution (used in filename)
         index: Product index (used as fallback for naming)
+        **kwargs: Additional parameters including:
+            - resolution: Requested resolution (used in filename)
 
     Returns:
         Path to the created metadata file, or None if creation failed
     """
+    # Extract resolution from kwargs
+    resolution: int = kwargs.get("resolution", 10)
     # Extract product identifiers, with fallbacks for missing data
     product_id: str = product.get("Id", f"unknown_{index}")
     product_name: str = product.get("Name", f"S2_product_{index}")
@@ -364,8 +367,8 @@ def _create_product_metadata(
 def _download_s2_product(
     client: "CopernicusClient",
     product: Dict[str, Any],
-    resolution: int,
     index: int,
+    **kwargs: Any,
 ) -> Optional[Path]:
     """Download actual Sentinel-2 satellite imagery.
 
@@ -375,12 +378,15 @@ def _download_s2_product(
     Args:
         client: CopernicusClient for authentication and cache directory
         product: Product dictionary from the API search results
-        resolution: Requested resolution (used in filename)
         index: Product index (used as fallback for naming)
+        **kwargs: Additional parameters including:
+            - resolution: Requested resolution (used in filename)
 
     Returns:
         Path to the downloaded file, or None if download failed
     """
+    # Extract resolution from kwargs
+    resolution: int = kwargs.get("resolution", 10)
     # Extract product identifiers
     product_id: str = product.get("Id", f"unknown_{index}")
     product_name: str = product.get("Name", f"S2_product_{index}")
