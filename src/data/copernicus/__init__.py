@@ -18,7 +18,7 @@ from .indices import (
     calculate_savi,
 )
 from .quality import apply_cloud_mask_to_image, extract_cloud_mask
-from .utils import find_granule_directory
+from .utils import create_validated_bbox, find_granule_directory
 from .visualization import (
     create_band_analysis_plot,
     create_comparison_plot,
@@ -53,6 +53,7 @@ __all__ = [
     "calculate_savi",
     "calculate_nbr",
     # Utilities
+    "create_validated_bbox",
     "find_granule_directory",
     # Visualization
     "create_coverage_map",

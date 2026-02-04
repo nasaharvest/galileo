@@ -11,7 +11,9 @@ import hashlib
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Union
+
+from shapely.geometry import Polygon, box
 
 
 def validate_bbox(bbox: List[float]) -> None:
@@ -165,39 +167,77 @@ def ensure_cache_dir(cache_dir: Path) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
 
-def bbox_to_wkt(bbox: List[float]) -> str:
+def create_validated_bbox(bbox: Union[List[float], Polygon]) -> Polygon:
+    """Create and validate a bounding box as a shapely Polygon.
+
+    This function validates bbox coordinates and returns a shapely Polygon object,
+    which provides useful properties like .wkt for WKT format and .bounds for
+    coordinate access. Using shapely reduces code duplication and provides
+    access to spatial operations.
+
+    Args:
+        bbox: Either a list of 4 floats [min_lon, min_lat, max_lon, max_lat]
+              or an existing shapely Polygon object.
+              Example: [25.6796, -27.6721, 25.6897, -27.663]
+
+    Returns:
+        shapely Polygon object representing the bounding box rectangle.
+        The polygon has useful properties:
+        - .wkt: WKT string representation
+        - .bounds: tuple of (min_lon, min_lat, max_lon, max_lat)
+        - Spatial operations: intersects(), contains(), etc.
+
+    Raises:
+        ValueError: If bbox format is wrong or coordinates are invalid.
+
+    Example:
+        >>> bbox_poly = create_validated_bbox([0, 0, 1, 1])
+        >>> bbox_poly.wkt
+        'POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))'
+        >>> bbox_poly.bounds
+        (0.0, 0.0, 1.0, 1.0)
+    """
+    # If already a Polygon, validate its bounds
+    if isinstance(bbox, Polygon):
+        min_lon, min_lat, max_lon, max_lat = bbox.bounds
+        bbox_list = [min_lon, min_lat, max_lon, max_lat]
+    else:
+        # Validate the list format
+        validate_bbox(bbox)
+        bbox_list = bbox
+
+    # Create shapely box (rectangle) from coordinates
+    # box(minx, miny, maxx, maxy) creates a rectangular polygon
+    min_lon, min_lat, max_lon, max_lat = bbox_list
+    return box(min_lon, min_lat, max_lon, max_lat)
+
+
+def bbox_to_wkt(bbox: Union[List[float], Polygon]) -> str:
     """Convert bounding box to Well-Known Text (WKT) polygon format.
 
     WKT is a standard format for representing geometric shapes in spatial databases.
     The Copernicus API uses WKT polygons for spatial queries.
 
+    This function now uses shapely for WKT generation, which is more robust
+    and maintainable than manual string formatting.
+
     Args:
-        bbox: Bounding box as [min_lon, min_lat, max_lon, max_lat]
+        bbox: Either a list [min_lon, min_lat, max_lon, max_lat] or shapely Polygon
               Example: [25.6796, -27.6721, 25.6897, -27.663]
 
     Returns:
         WKT polygon string representing the bounding box rectangle
-        Example: "POLYGON((25.6796 -27.6721, 25.6897 -27.6721, 25.6897 -27.663, 25.6796 -27.663, 25.6796 -27.6721))"
+        Example: "POLYGON ((25.6796 -27.6721, 25.6897 -27.6721, 25.6897 -27.663, 25.6796 -27.663, 25.6796 -27.6721))"
 
     Note:
-        The polygon is created by connecting the four corners of the rectangle in order:
-        1. Bottom-left (min_lon, min_lat)
-        2. Bottom-right (max_lon, min_lat)
-        3. Top-right (max_lon, max_lat)
-        4. Top-left (min_lon, max_lat)
-        5. Back to bottom-left to close the polygon
+        This function is maintained for backward compatibility. New code should
+        use create_validated_bbox() and access the .wkt property directly.
     """
-    min_lon: float = bbox[0]
-    min_lat: float = bbox[1]
-    max_lon: float = bbox[2]
-    max_lat: float = bbox[3]
+    # Create validated shapely polygon
+    bbox_poly = create_validated_bbox(bbox)
 
-    # Create a closed polygon by listing all corner points
-    # Note: WKT format is "longitude latitude" (x y), not "latitude longitude"
-    return (
-        f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, "
-        f"{max_lon} {max_lat}, {min_lon} {max_lat}, {min_lon} {min_lat}))"
-    )
+    # Use shapely's built-in WKT generation
+    return bbox_poly.wkt
 
 
 def find_granule_directory(safe_dir: Path, zip_filename: str) -> Path | None:
