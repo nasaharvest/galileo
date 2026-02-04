@@ -49,7 +49,8 @@ dependencies = [
 dev = [
     "ruff==0.2.0",
     "mypy==1.8.0",
-    "coverage==7.4.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
     "pre-commit==3.6.0",
     "marimo",
 ]
@@ -72,6 +73,41 @@ packages = ["src"]
 lint.extend-select = ["I"]
 line-length = 99
 exclude = ["anysat"]
+
+[tool.pytest.ini_options]
+# Pytest configuration
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
 
 [dependency-groups]
 dev = [
