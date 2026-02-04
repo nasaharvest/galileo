@@ -573,8 +573,6 @@ def _download_s1_product(
         >>> path = _download_s1_product(client, product, 0)
         >>> print(path)  # data/cache/copernicus/s1/S1A_IW_GRDH_....zip
     """
-    from .download_utils import download_with_retry
-
     # Extract product identifiers from API response
     # These uniquely identify the SAR product we want to download
     product_id: str = product.get("Id", f"unknown_{index}")
@@ -609,9 +607,8 @@ def _download_s1_product(
     print("   Type: Sentinel-1 SAR (Synthetic Aperture Radar)")
     print(f"   URL: {download_url}")
 
-    # Use robust download with retry and token refresh
-    success = download_with_retry(
-        client=client,
+    # Use client's download method with retry and token refresh
+    success = client.download_product(
         url=download_url,
         output_path=file_path,
         total_size=content_length,

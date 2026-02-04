@@ -381,8 +381,6 @@ def _download_s2_product(
     Returns:
         Path to the downloaded file, or None if download failed
     """
-    from .download_utils import download_with_retry
-
     # Extract product identifiers
     product_id: str = product.get("Id", f"unknown_{index}")
     product_name: str = product.get("Name", f"S2_product_{index}")
@@ -410,9 +408,8 @@ def _download_s2_product(
     print(f"   Size: {content_length / (1024*1024):.1f} MB")
     print(f"   URL: {download_url}")
 
-    # Use robust download with retry and token refresh
-    success = download_with_retry(
-        client=client,
+    # Use client's download method with retry and token refresh
+    success = client.download_product(
         url=download_url,
         output_path=file_path,
         total_size=content_length,
