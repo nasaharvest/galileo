@@ -4,13 +4,13 @@ This module provides functions for quality assessment and masking of Sentinel-2
 optical imagery, particularly cloud masking using the Scene Classification Layer (SCL).
 """
 
-import tempfile
-import zipfile
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import rasterio
+
+from .utils import extract_s2_safe_structure
 
 
 def extract_cloud_mask(zip_file_path: Path) -> Optional[np.ndarray]:
@@ -63,21 +63,7 @@ def extract_cloud_mask(zip_file_path: Path) -> Optional[np.ndarray]:
         Returns None if extraction fails or SCL band not found
     """
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-
-            # Extract ZIP file
-            with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
-                zip_ref.extractall(temp_path)
-
-            # Find SAFE directory
-            safe_dirs = list(temp_path.glob("*.SAFE"))
-            if not safe_dirs:
-                print(f"No SAFE directory found in {zip_file_path.name}")
-                return None
-
-            safe_dir = safe_dirs[0]
-
+        with extract_s2_safe_structure(zip_file_path) as (safe_dir, granule_dir):
             # Check if this is a Level-2A product (has SCL band)
             if "MSIL1C" in safe_dir.name:
                 print(
@@ -85,16 +71,6 @@ def extract_cloud_mask(zip_file_path: Path) -> Optional[np.ndarray]:
                     "Cloud masking requires Level-2A products."
                 )
                 return None
-
-            # Find IMG_DATA directory
-            img_data_dir = safe_dir / "GRANULE"
-            granule_dirs = list(img_data_dir.glob("*"))
-
-            if not granule_dirs:
-                print(f"No granule directories found in {zip_file_path.name}")
-                return None
-
-            granule_dir = granule_dirs[0]
 
             # SCL band is in IMG_DATA/R20m/ subdirectory (20m resolution)
             img_dir_20m = granule_dir / "IMG_DATA" / "R20m"

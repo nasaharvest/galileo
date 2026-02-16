@@ -9,9 +9,14 @@ This module contains helper functions used throughout the Copernicus data fetchi
 
 import hashlib
 import re
+import tempfile
+import zipfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, Generator, List, Tuple, Union
+
+from shapely.geometry import Polygon, box
 
 
 def validate_bbox(bbox: List[float]) -> None:
@@ -165,36 +170,167 @@ def ensure_cache_dir(cache_dir: Path) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
 
-def bbox_to_wkt(bbox: List[float]) -> str:
+def create_validated_bbox(bbox: Union[List[float], Polygon]) -> Polygon:
+    """Create and validate a bounding box as a shapely Polygon.
+
+    This function validates bbox coordinates and returns a shapely Polygon object,
+    which provides useful properties like .wkt for WKT format and .bounds for
+    coordinate access. Using shapely reduces code duplication and provides
+    access to spatial operations.
+
+    Args:
+        bbox: Either a list of 4 floats [min_lon, min_lat, max_lon, max_lat]
+              or an existing shapely Polygon object.
+              Example: [25.6796, -27.6721, 25.6897, -27.663]
+
+    Returns:
+        shapely Polygon object representing the bounding box rectangle.
+        The polygon has useful properties:
+        - .wkt: WKT string representation
+        - .bounds: tuple of (min_lon, min_lat, max_lon, max_lat)
+        - Spatial operations: intersects(), contains(), etc.
+
+    Raises:
+        ValueError: If bbox format is wrong or coordinates are invalid.
+
+    Example:
+        >>> bbox_poly = create_validated_bbox([0, 0, 1, 1])
+        >>> bbox_poly.wkt
+        'POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))'
+        >>> bbox_poly.bounds
+        (0.0, 0.0, 1.0, 1.0)
+    """
+    # If already a Polygon, validate its bounds
+    if isinstance(bbox, Polygon):
+        min_lon, min_lat, max_lon, max_lat = bbox.bounds
+        bbox_list = [min_lon, min_lat, max_lon, max_lat]
+    else:
+        # Validate the list format
+        validate_bbox(bbox)
+        bbox_list = bbox
+
+    # Create shapely box (rectangle) from coordinates
+    # box(minx, miny, maxx, maxy) creates a rectangular polygon
+    min_lon, min_lat, max_lon, max_lat = bbox_list
+    return box(min_lon, min_lat, max_lon, max_lat)
+
+
+def bbox_to_wkt(bbox: Union[List[float], Polygon]) -> str:
     """Convert bounding box to Well-Known Text (WKT) polygon format.
 
     WKT is a standard format for representing geometric shapes in spatial databases.
     The Copernicus API uses WKT polygons for spatial queries.
 
+    This function now uses shapely for WKT generation, which is more robust
+    and maintainable than manual string formatting.
+
     Args:
-        bbox: Bounding box as [min_lon, min_lat, max_lon, max_lat]
+        bbox: Either a list [min_lon, min_lat, max_lon, max_lat] or shapely Polygon
               Example: [25.6796, -27.6721, 25.6897, -27.663]
 
     Returns:
         WKT polygon string representing the bounding box rectangle
-        Example: "POLYGON((25.6796 -27.6721, 25.6897 -27.6721, 25.6897 -27.663, 25.6796 -27.663, 25.6796 -27.6721))"
+        Example: "POLYGON ((25.6796 -27.6721, 25.6897 -27.6721, 25.6897 -27.663, 25.6796 -27.663, 25.6796 -27.6721))"
 
     Note:
-        The polygon is created by connecting the four corners of the rectangle in order:
-        1. Bottom-left (min_lon, min_lat)
-        2. Bottom-right (max_lon, min_lat)
-        3. Top-right (max_lon, max_lat)
-        4. Top-left (min_lon, max_lat)
-        5. Back to bottom-left to close the polygon
+        This function is maintained for backward compatibility. New code should
+        use create_validated_bbox() and access the .wkt property directly.
     """
-    min_lon: float = bbox[0]
-    min_lat: float = bbox[1]
-    max_lon: float = bbox[2]
-    max_lat: float = bbox[3]
+    # Create validated shapely polygon
+    bbox_poly = create_validated_bbox(bbox)
 
-    # Create a closed polygon by listing all corner points
-    # Note: WKT format is "longitude latitude" (x y), not "latitude longitude"
-    return (
-        f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, "
-        f"{max_lon} {max_lat}, {min_lon} {max_lat}, {min_lon} {min_lat}))"
-    )
+    # Use shapely's built-in WKT generation
+    return bbox_poly.wkt
+
+
+def find_granule_directory(safe_dir: Path, zip_filename: str) -> Path | None:
+    """Find the granule directory within a Sentinel-2 SAFE directory structure.
+
+    Sentinel-2 products follow the SAFE (Standard Archive Format for Europe) structure:
+    - *.SAFE/
+      - GRANULE/
+        - L1C_T31UGQ_A012345_20220101T123456/  (granule directory)
+          - IMG_DATA/  (contains the actual band files)
+          - QI_DATA/   (quality information)
+          - ...
+
+    This function navigates this structure to find the granule directory, which contains
+    the IMG_DATA folder with the actual satellite imagery bands.
+
+    Args:
+        safe_dir: Path to the SAFE directory (e.g., "S2A_MSIL1C_20220101T123456.SAFE")
+        zip_filename: Name of the ZIP file (used for error messages)
+
+    Returns:
+        Path to the granule directory if found, None otherwise
+
+    Example:
+        >>> safe_dir = Path("S2A_MSIL1C_20220101T123456.SAFE")
+        >>> granule_dir = find_granule_directory(safe_dir, "product.zip")
+        >>> if granule_dir:
+        ...     img_data = granule_dir / "IMG_DATA"
+    """
+    # Navigate to GRANULE directory
+    img_data_dir = safe_dir / "GRANULE"
+
+    # Find all subdirectories (should be exactly one granule directory)
+    granule_dirs = list(img_data_dir.glob("*"))
+
+    if not granule_dirs:
+        print(f"No granule directories found in {zip_filename}")
+        return None
+
+    # Return the first (and typically only) granule directory
+    return granule_dirs[0]
+
+
+@contextmanager
+def extract_s2_safe_structure(
+    zip_file_path: Path,
+) -> Generator[Tuple[Path, Path], None, None]:
+    """Extract Sentinel-2 ZIP and provide access to SAFE directory structure.
+
+    This context manager handles the common pattern of:
+    1. Creating a temporary directory
+    2. Extracting the Sentinel-2 ZIP file
+    3. Finding the SAFE directory
+    4. Finding the granule directory
+    5. Cleaning up on exit
+
+    This consolidates code that was duplicated across quality.py, indices.py,
+    and image_processing.py.
+
+    Args:
+        zip_file_path: Path to Sentinel-2 ZIP file
+
+    Yields:
+        Tuple of (safe_dir, granule_dir) Path objects
+
+    Raises:
+        FileNotFoundError: If SAFE directory or granule directory not found
+
+    Example:
+        >>> with extract_s2_safe_structure(zip_path) as (safe_dir, granule_dir):
+        ...     img_data = granule_dir / "IMG_DATA"
+        ...     # Process bands...
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Extract ZIP file
+        with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
+            zip_ref.extractall(temp_path)
+
+        # Find SAFE directory
+        safe_dirs = list(temp_path.glob("*.SAFE"))
+        if not safe_dirs:
+            raise FileNotFoundError(f"No SAFE directory found in {zip_file_path.name}")
+
+        safe_dir = safe_dirs[0]
+
+        # Find granule directory
+        granule_dir = find_granule_directory(safe_dir, zip_file_path.name)
+        if granule_dir is None:
+            raise FileNotFoundError(f"No granule directory found in {zip_file_path.name}")
+
+        yield safe_dir, granule_dir

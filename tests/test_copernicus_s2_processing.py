@@ -84,6 +84,47 @@ class TestImageProcessing:
         stats = get_image_statistics(None)
         assert stats == {}
 
+    def test_extract_rgb_composite_invalid_band_count_too_many(self):
+        """Test that extract_rgb_composite raises error with more than 3 bands."""
+        from src.data.copernicus.image_processing import extract_rgb_composite
+
+        # Create a mock ZIP file path (doesn't need to exist for this test)
+        mock_zip = Path("test.zip")
+
+        # Should raise ValueError with 4 bands
+        with pytest.raises(ValueError, match="RGB composite requires exactly 3 bands"):
+            extract_rgb_composite(mock_zip, bands=["B04", "B03", "B02", "B08"])
+
+    def test_extract_rgb_composite_invalid_band_count_too_few(self):
+        """Test that extract_rgb_composite raises error with fewer than 3 bands."""
+        from src.data.copernicus.image_processing import extract_rgb_composite
+
+        mock_zip = Path("test.zip")
+
+        # Should raise ValueError with 2 bands
+        with pytest.raises(ValueError, match="RGB composite requires exactly 3 bands"):
+            extract_rgb_composite(mock_zip, bands=["B04", "B03"])
+
+    def test_extract_rgb_composite_invalid_band_count_one(self):
+        """Test that extract_rgb_composite raises error with 1 band."""
+        from src.data.copernicus.image_processing import extract_rgb_composite
+
+        mock_zip = Path("test.zip")
+
+        # Should raise ValueError with 1 band
+        with pytest.raises(ValueError, match="RGB composite requires exactly 3 bands"):
+            extract_rgb_composite(mock_zip, bands=["B04"])
+
+    def test_create_false_color_composite_invalid_band_count(self):
+        """Test that create_false_color_composite raises error with wrong band count."""
+        from src.data.copernicus.image_processing import create_false_color_composite
+
+        mock_zip = Path("test.zip")
+
+        # Should raise ValueError with 4 bands
+        with pytest.raises(ValueError, match="False color composite requires exactly 3 bands"):
+            create_false_color_composite(mock_zip, bands=["B08", "B04", "B03", "B02"])
+
 
 class TestSpectralIndices:
     """Test spectral index calculations."""

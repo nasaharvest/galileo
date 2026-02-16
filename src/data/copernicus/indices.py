@@ -5,13 +5,13 @@ from Sentinel-2 multispectral imagery. These indices enhance specific features
 and are widely used in remote sensing applications.
 """
 
-import tempfile
-import zipfile
 from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
 import rasterio
+
+from .utils import extract_s2_safe_structure
 
 
 def _extract_band(zip_file_path: Path, band_name: str) -> Optional[np.ndarray]:
@@ -27,24 +27,7 @@ def _extract_band(zip_file_path: Path, band_name: str) -> Optional[np.ndarray]:
         Band data as numpy array, or None if extraction fails
     """
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-
-            with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
-                zip_ref.extractall(temp_path)
-
-            safe_dirs = list(temp_path.glob("*.SAFE"))
-            if not safe_dirs:
-                return None
-
-            safe_dir = safe_dirs[0]
-            img_data_dir = safe_dir / "GRANULE"
-            granule_dirs = list(img_data_dir.glob("*"))
-
-            if not granule_dirs:
-                return None
-
-            granule_dir = granule_dirs[0]
+        with extract_s2_safe_structure(zip_file_path) as (safe_dir, granule_dir):
             img_dir = granule_dir / "IMG_DATA"
 
             # Try multiple naming patterns

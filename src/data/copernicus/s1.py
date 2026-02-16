@@ -18,8 +18,15 @@ SAR Background:
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
+from .common import (
+    apply_product_limit,
+    check_cache,
+    process_products,
+    save_cache,
+)
+from .enums import S1AcquisitionMode, S1OrbitDirection, S1Polarization, S1ProductType
 from .utils import bbox_to_wkt, build_cache_key, sanitize_filename
 
 # Use TYPE_CHECKING to avoid circular imports while still getting type hints
@@ -32,10 +39,10 @@ def fetch_s1_products(
     bbox: List[float],
     start_date: str,
     end_date: str,
-    product_type: str,
-    polarization: str,
-    orbit_direction: str,
-    acquisition_mode: str = "IW",
+    product_type: Union[str, S1ProductType],
+    polarization: Union[str, S1Polarization],
+    orbit_direction: Union[str, S1OrbitDirection],
+    acquisition_mode: Union[str, S1AcquisitionMode] = "IW",
     download_data: bool = True,
     max_products: int = 3,
 ) -> List[Path]:
@@ -55,23 +62,22 @@ def fetch_s1_products(
                    Example: "2024-01-01"
         end_date: End date in YYYY-MM-DD format
                  Example: "2024-01-31"
-        product_type: SAR product type:
-                     - "GRD": Ground Range Detected (most common, preprocessed and geocoded)
-                             Best for most applications, ready to use
-                     - "SLC": Single Look Complex (raw data in slant range geometry)
-                             Requires more processing, used for interferometry
-                     - "OCN": Ocean products (specialized for ocean wind/wave analysis)
-        polarization: Radar polarization modes (e.g., "VV,VH"):
-                     - "VV": Vertical transmit, Vertical receive (good for water, urban)
-                     - "VH": Vertical transmit, Horizontal receive (good for vegetation)
-                     - "HH": Horizontal transmit, Horizontal receive (less common)
-                     - "HV": Horizontal transmit, Vertical receive (less common)
-                     Most land applications use "VV,VH" (dual polarization)
-        orbit_direction: Satellite orbit direction:
-                        - "ASCENDING": Moving from south to north (evening pass)
-                        - "DESCENDING": Moving from north to south (morning pass)
-                        Different directions show different aspects of terrain
-        acquisition_mode: SAR acquisition mode (default: "IW")
+        product_type: SAR product type (string or S1ProductType enum):
+                     - "GRD" or S1ProductType.GRD: Ground Range Detected (most common)
+                     - "SLC" or S1ProductType.SLC: Single Look Complex (raw data)
+                     - "OCN" or S1ProductType.OCN: Ocean products
+        polarization: Radar polarization modes (string or S1Polarization enum):
+                     - "VV,VH" or S1Polarization.dual_pol_vv_vh(): Dual pol (most common)
+                     - "VV" or S1Polarization.VV: Single vertical polarization
+                     - "VH" or S1Polarization.VH: Cross polarization
+        orbit_direction: Satellite orbit direction (string or S1OrbitDirection enum):
+                        - "ASCENDING" or S1OrbitDirection.ASCENDING: South to north
+                        - "DESCENDING" or S1OrbitDirection.DESCENDING: North to south
+        acquisition_mode: SAR acquisition mode (string or S1AcquisitionMode enum, default: "IW")
+                         - "IW" or S1AcquisitionMode.IW: Interferometric Wide (default)
+                         - "EW" or S1AcquisitionMode.EW: Extra Wide
+                         - "SM" or S1AcquisitionMode.SM: Strip Map
+                         - "WV" or S1AcquisitionMode.WV: Wave Mode
 
                          WHAT IS ACQUISITION MODE:
                          Sentinel-1 SAR can operate in different imaging modes,
@@ -183,6 +189,16 @@ def fetch_s1_products(
         ... )
         >>> print(f"Downloaded {len(files)} SAR products")
     """
+    # Convert enums to strings for internal use
+    product_type_str = str(product_type.value if hasattr(product_type, "value") else product_type)
+    polarization_str = str(polarization.value if hasattr(polarization, "value") else polarization)
+    orbit_direction_str = str(
+        orbit_direction.value if hasattr(orbit_direction, "value") else orbit_direction
+    )
+    acquisition_mode_str = str(
+        acquisition_mode.value if hasattr(acquisition_mode, "value") else acquisition_mode
+    )
+
     # Build a unique cache key based on all parameters that affect the result
     # SAR products have different parameters than optical imagery
     cache_key = build_cache_key(
@@ -190,10 +206,10 @@ def fetch_s1_products(
         bbox=bbox,
         start_date=start_date,
         end_date=end_date,
-        product_type=product_type,
-        polarization=polarization,
-        orbit_direction=orbit_direction,
-        acquisition_mode=acquisition_mode,  # Include acquisition mode in cache key
+        product_type=product_type_str,
+        polarization=polarization_str,
+        orbit_direction=orbit_direction_str,
+        acquisition_mode=acquisition_mode_str,  # Include acquisition mode in cache key
         download_data=download_data,  # Include download mode in cache key
     )
 
@@ -201,19 +217,9 @@ def fetch_s1_products(
     cache_file = client.cache_dir / f"{cache_key}.json"
 
     # Check if we already have cached results for this exact request
-    if cache_file.exists():
-        print(f"Loading S1 products from cache: {cache_file}")
-        with open(cache_file) as f:
-            cached_data: Dict[str, Any] = json.load(f)
-
-        # Verify that all cached files still exist on disk
-        # If files were deleted, we need to re-create them
-        cached_paths: List[Path] = [Path(p) for p in cached_data["file_paths"]]
-        if all(p.exists() for p in cached_paths):
-            return cached_paths  # Cache hit - return existing results
-        else:
-            print("Some cached files missing, re-downloading...")
-            # Fall through to re-fetch the data
+    cached_paths = check_cache(cache_file)
+    if cached_paths is not None:
+        return cached_paths
 
     # Search the Copernicus catalog for SAR products matching our criteria
     products: List[Dict[str, Any]] = _search_s1_products(
@@ -221,10 +227,10 @@ def fetch_s1_products(
         bbox,
         start_date,
         end_date,
-        product_type,
-        polarization,
-        orbit_direction,
-        acquisition_mode,
+        product_type_str,
+        polarization_str,
+        orbit_direction_str,
+        acquisition_mode_str,
     )
 
     # Handle case where no products were found
@@ -235,43 +241,22 @@ def fetch_s1_products(
     print(f"Found {len(products)} S1 products")
 
     # Apply max_products limit if specified
-    # This prevents accidental huge downloads (each product is 1-2GB)
-    if max_products is not None and len(products) > max_products:
-        print(f"⚠️  Limiting to first {max_products} products (found {len(products)} total)")
-        print("   To download more, use max_products parameter:")
-        print(f"   client.fetch_s1(..., max_products={len(products)})")
-        products = products[:max_products]
+    products = apply_product_limit(products, max_products, "S1")
 
     # Process products (download or create metadata)
-    downloaded_paths: List[Path] = []
-
-    if download_data:
-        print("\n📥 DOWNLOADING SAR IMAGERY")
-        print("=" * 40)
-
-        for i, product in enumerate(products, 1):
-            print(f"\n🛰️ Downloading product {i}/{len(products)}")
-
-            downloaded_file = _download_s1_product(client, product, i - 1)
-            if downloaded_file:
-                downloaded_paths.append(downloaded_file)
-                print(f"✅ Downloaded: {downloaded_file.name}")
-            else:
-                print(f"❌ Failed to download product {i}")
-    else:
-        print("\n📋 CREATING METADATA FILES")
-        print("=" * 35)
-
-        # Create metadata files for the found products
-        for i, product in enumerate(products):
-            metadata_file: Optional[Path] = _create_product_metadata(client, product, i)
-            if metadata_file:
-                downloaded_paths.append(metadata_file)
+    downloaded_paths = process_products(
+        client=client,
+        products=products,
+        download_data=download_data,
+        satellite="SENTINEL-1",
+        download_func=_download_s1_product,
+        metadata_func=_create_product_metadata,
+    )
 
     # Cache the results for future requests
-    # Store both the original search parameters and the resulting file paths
-    cache_data: Dict[str, Any] = {
-        "parameters": {
+    save_cache(
+        cache_file=cache_file,
+        parameters={
             "bbox": bbox,
             "start_date": start_date,
             "end_date": end_date,
@@ -281,13 +266,9 @@ def fetch_s1_products(
             "acquisition_mode": acquisition_mode,
             "download_data": download_data,
         },
-        "products": products,  # Full product metadata from API
-        "file_paths": [str(p) for p in downloaded_paths],  # Paths to created files
-    }
-
-    # Write cache data to disk
-    with open(cache_file, "w") as f:
-        json.dump(cache_data, f, indent=2)
+        products=products,
+        file_paths=downloaded_paths,
+    )
 
     action = "Downloaded" if download_data else "Created metadata for"
     print(f"\n✅ {action} {len(downloaded_paths)} S1 products, cached to {cache_file}")
@@ -602,8 +583,6 @@ def _download_s1_product(
         >>> path = _download_s1_product(client, product, 0)
         >>> print(path)  # data/cache/copernicus/s1/S1A_IW_GRDH_....zip
     """
-    from .download_utils import download_with_retry
-
     # Extract product identifiers from API response
     # These uniquely identify the SAR product we want to download
     product_id: str = product.get("Id", f"unknown_{index}")
@@ -638,9 +617,8 @@ def _download_s1_product(
     print("   Type: Sentinel-1 SAR (Synthetic Aperture Radar)")
     print(f"   URL: {download_url}")
 
-    # Use robust download with retry and token refresh
-    success = download_with_retry(
-        client=client,
+    # Use client's download method with retry and token refresh
+    success = client.download_product(
         url=download_url,
         output_path=file_path,
         total_size=content_length,

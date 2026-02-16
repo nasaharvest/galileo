@@ -17,6 +17,8 @@ import numpy as np
 import rasterio
 from rasterio.warp import transform_bounds
 
+from .utils import find_granule_directory
+
 
 def extract_rgb_composite(
     zip_file_path: Path,
@@ -54,16 +56,48 @@ def extract_rgb_composite(
 
         Returns None if extraction fails.
     """
+    from .enums import S2Band
+
     if bands is None:
-        bands = ["B04", "B03", "B02"]  # Red, Green, Blue for natural color
+        bands = S2Band.rgb_bands()  # Red, Green, Blue for natural color
+
+    # Validate that exactly 3 bands are provided for RGB composite
+    if len(bands) != 3:
+        raise ValueError(
+            f"RGB composite requires exactly 3 bands, but {len(bands)} were provided: {bands}. "
+            f"For RGB, use bands like ['B04', 'B03', 'B02'] (Red, Green, Blue)."
+        )
 
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
-            # Extract ZIP file
+            # First, identify which files we need from the ZIP without extracting everything
             with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
-                zip_ref.extractall(temp_path)
+                all_files = zip_ref.namelist()
+
+                # Find the files we need for the requested bands
+                files_to_extract = []
+                band_file_mapping = {}
+
+                for band in bands:
+                    # Look for band files matching various patterns
+                    for file_path in all_files:
+                        filename = file_path.split("/")[-1]
+                        # Match patterns like: *_B04_10m.jp2, *_B04.jp2, etc.
+                        if (
+                            f"_{band}_10m.jp2" in filename
+                            or f"_{band}_20m.jp2" in filename
+                            or f"_{band}.jp2" in filename
+                        ) and band not in band_file_mapping:
+                            files_to_extract.append(file_path)
+                            band_file_mapping[band] = file_path
+                            break
+
+                # Extract only the files we need (much faster than extractall!)
+                # This typically extracts 3 files (~50MB) instead of all 13+ files (~700MB)
+                for file_path in files_to_extract:
+                    zip_ref.extract(file_path, temp_path)
 
             # Find SAFE directory (Sentinel-2 format)
             safe_dirs = list(temp_path.glob("*.SAFE"))
@@ -73,34 +107,19 @@ def extract_rgb_composite(
 
             safe_dir = safe_dirs[0]
 
-            # Find IMG_DATA directory
-            img_data_dir = safe_dir / "GRANULE"
-            granule_dirs = list(img_data_dir.glob("*"))
-
-            if not granule_dirs:
-                print(f"No granule directories found in {zip_file_path.name}")
+            # Find granule directory
+            granule_dir = find_granule_directory(safe_dir, zip_file_path.name)
+            if granule_dir is None:
                 return None
 
-            granule_dir = granule_dirs[0]
-            img_dir = granule_dir / "IMG_DATA"
-
-            # Find band files
+            # Build band_files dict from the extracted files
             band_files = {}
             for band in bands:
-                # Try multiple naming patterns with recursive search
-                patterns = [
-                    f"**/*_{band}_10m.jp2",  # Standard pattern in R10m subdirectory
-                    f"**/*_{band}.jp2",  # Alternative pattern
-                    f"**/*{band}.jp2",  # Simple pattern
-                    f"*_{band}_10m.jp2",  # Direct in IMG_DATA (legacy)
-                    f"*_{band}.jp2",  # Alternative direct
-                ]
-
-                for pattern in patterns:
-                    band_matches = list(img_dir.glob(pattern))
-                    if band_matches:
-                        band_files[band] = band_matches[0]
-                        break
+                if band in band_file_mapping:
+                    # Construct the full path to the extracted file
+                    extracted_file = temp_path / band_file_mapping[band]
+                    if extracted_file.exists():
+                        band_files[band] = extracted_file
 
             if len(band_files) < len(bands):
                 print(f"Only found {len(band_files)}/{len(bands)} bands in {zip_file_path.name}")
@@ -124,6 +143,11 @@ def extract_rgb_composite(
                         rgb_bands.append(band_data)
 
             if len(rgb_bands) != len(bands):
+                print(
+                    f"Error: Failed to read all bands from {zip_file_path.name}. "
+                    f"Expected {len(bands)} bands {bands}, but only read {len(rgb_bands)}. "
+                    f"This may indicate corrupted band files or rasterio read errors."
+                )
                 return None
 
             # Stack bands into RGB array
@@ -197,51 +221,44 @@ def extract_rgb_composite(
 def get_available_bands(zip_file_path: Path) -> List[str]:
     """Get list of available bands in a Sentinel-2 ZIP file.
 
+    This function reads the ZIP file's table of contents without extracting any files,
+    making it much faster and more efficient than extracting the entire archive.
+
     Args:
         zip_file_path: Path to Sentinel-2 ZIP file
 
     Returns:
         List of available band names (e.g., ['B01', 'B02', 'B03', ...])
+        Sorted in ascending order (B01, B02, B03, etc.)
     """
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
+        # Read ZIP file contents without extraction
+        with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
+            # Get list of all files in the ZIP
+            all_files = zip_ref.namelist()
 
-            # Extract ZIP file
-            with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
-                zip_ref.extractall(temp_path)
+        # Filter for JP2 band files in IMG_DATA directory
+        # Typical path: S2A_MSIL1C_*.SAFE/GRANULE/*/IMG_DATA/*_B*.jp2
+        bands = []
 
-            # Find SAFE directory
-            safe_dirs = list(temp_path.glob("*.SAFE"))
-            if not safe_dirs:
-                return []
+        for file_path in all_files:
+            # Check if this is a band file (contains _B and ends with .jp2)
+            if "_B" in file_path and file_path.endswith(".jp2"):
+                # Extract filename from path
+                filename = file_path.split("/")[-1]
 
-            safe_dir = safe_dirs[0]
+                # Extract band name (e.g., T31UGQ_20251129T103309_B02.jp2 -> B02)
+                if "_B" in filename:
+                    band_part = filename.split("_B")[1]
+                    band_name = "B" + band_part.split(".")[0].replace("_10m", "").replace(
+                        "_20m", ""
+                    ).replace("_60m", "")
 
-            # Find IMG_DATA directory
-            img_data_dir = safe_dir / "GRANULE"
-            granule_dirs = list(img_data_dir.glob("*"))
-
-            if not granule_dirs:
-                return []
-
-            granule_dir = granule_dirs[0]
-            img_dir = granule_dir / "IMG_DATA"
-
-            # Find all JP2 files and extract band names
-            jp2_files = list(img_dir.glob("*.jp2"))
-            bands = []
-
-            for jp2_file in jp2_files:
-                # Extract band name from filename (e.g., T31UGQ_20251129T103309_B02.jp2 -> B02)
-                name = jp2_file.name
-                if "_B" in name:
-                    band_part = name.split("_B")[1]
-                    band_name = "B" + band_part.split(".")[0]
+                    # Add unique band names only
                     if band_name not in bands:
                         bands.append(band_name)
 
-            return sorted(bands)
+        return sorted(bands)
 
     except Exception as e:
         print(f"Error getting bands from {zip_file_path.name}: {e}")
@@ -260,8 +277,17 @@ def create_false_color_composite(
     Returns:
         Same format as extract_rgb_composite but with false color bands
     """
+    from .enums import S2Band
+
     if bands is None:
-        bands = ["B08", "B04", "B03"]  # NIR, Red, Green for vegetation
+        bands = S2Band.false_color_bands()  # NIR, Red, Green for vegetation
+
+    # Validate that exactly 3 bands are provided for false color composite
+    if len(bands) != 3:
+        raise ValueError(
+            f"False color composite requires exactly 3 bands, but {len(bands)} were provided: {bands}. "
+            f"For false color, use bands like ['B08', 'B04', 'B03'] (NIR, Red, Green)."
+        )
 
     return extract_rgb_composite(zip_file_path, bands=bands, normalize=True)
 
@@ -313,7 +339,6 @@ def crop_to_bbox(
     image_array: np.ndarray,
     image_bounds: Tuple[float, float, float, float],
     target_bbox: List[float],
-    image_crs: str = "EPSG:4326",
 ) -> Optional[np.ndarray]:
     """Crop satellite image to user's requested bounding box.
 
@@ -348,8 +373,6 @@ def crop_to_bbox(
                      in WGS84 coordinates (degrees)
         target_bbox: User's requested area [min_lon, min_lat, max_lon, max_lat]
                     in WGS84 coordinates (degrees)
-        image_crs: Coordinate reference system of the image
-                  Default: "EPSG:4326" (WGS84 lat/lon)
 
     Returns:
         Cropped image array containing only the requested area

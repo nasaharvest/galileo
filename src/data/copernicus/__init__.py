@@ -1,6 +1,7 @@
 """Copernicus Data Space Ecosystem client for fetching Sentinel-1 and Sentinel-2 data."""
 
 from .client import CopernicusClient
+from .enums import S1AcquisitionMode, S1Polarization, S1ProductType, S2Band
 from .image_processing import (
     create_false_color_composite,
     crop_to_bbox,
@@ -17,6 +18,7 @@ from .indices import (
     calculate_savi,
 )
 from .quality import apply_cloud_mask_to_image, extract_cloud_mask
+from .utils import create_validated_bbox, find_granule_directory
 from .visualization import (
     create_band_analysis_plot,
     create_comparison_plot,
@@ -29,6 +31,11 @@ from .visualization import (
 
 __all__ = [
     "CopernicusClient",
+    # Enums
+    "S2Band",
+    "S1ProductType",
+    "S1Polarization",
+    "S1AcquisitionMode",
     # Image processing
     "extract_rgb_composite",
     "extract_sar_composite",
@@ -45,6 +52,9 @@ __all__ = [
     "calculate_evi",
     "calculate_savi",
     "calculate_nbr",
+    # Utilities
+    "create_validated_bbox",
+    "find_granule_directory",
     # Visualization
     "create_coverage_map",
     "display_satellite_image",

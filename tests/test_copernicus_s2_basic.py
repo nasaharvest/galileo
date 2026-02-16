@@ -14,6 +14,7 @@ from src.data.copernicus.client import CopernicusClient
 from src.data.copernicus.utils import (
     bbox_to_wkt,
     build_cache_key,
+    create_validated_bbox,
     sanitize_filename,
     validate_bbox,
     validate_date,
@@ -95,6 +96,43 @@ class TestCopernicusUtils(unittest.TestCase):
         self.assertIn("POLYGON", wkt)
         self.assertIn("0 0", wkt)
         self.assertIn("1 1", wkt)
+
+    def test_create_validated_bbox(self):
+        """Test creating validated bbox as shapely Polygon."""
+        bbox_list = [0, 0, 1, 1]
+        bbox_poly = create_validated_bbox(bbox_list)
+
+        # Check it's a Polygon
+        from shapely.geometry import Polygon
+
+        self.assertIsInstance(bbox_poly, Polygon)
+
+        # Check bounds match input
+        self.assertEqual(bbox_poly.bounds, (0.0, 0.0, 1.0, 1.0))
+
+        # Check WKT property works
+        wkt = bbox_poly.wkt
+        self.assertIn("POLYGON", wkt)
+
+    def test_create_validated_bbox_from_polygon(self):
+        """Test that create_validated_bbox accepts existing Polygon."""
+        from shapely.geometry import Polygon, box
+
+        bbox_poly = box(0, 0, 1, 1)
+        validated = create_validated_bbox(bbox_poly)
+
+        self.assertIsInstance(validated, Polygon)
+        self.assertEqual(validated.bounds, (0.0, 0.0, 1.0, 1.0))
+
+    def test_bbox_to_wkt_from_polygon(self):
+        """Test bbox_to_wkt accepts shapely Polygon."""
+        from shapely.geometry import box
+
+        bbox_poly = box(0, 0, 1, 1)
+        wkt = bbox_to_wkt(bbox_poly)
+
+        self.assertIn("POLYGON", wkt)
+        self.assertIn("0 0", wkt)
 
     def test_build_cache_key_deterministic(self):
         """Test that cache keys are deterministic."""
@@ -180,6 +218,53 @@ class TestCopernicusClient(unittest.TestCase):
         client = CopernicusClient(load_dotenv_file=False)
 
         # Invalid bbox
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1],  # Too few elements
+                start_date="2022-01-01",
+                end_date="2022-12-31",
+            )
+
+        # Invalid resolution
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1, 1],
+                start_date="2022-01-01",
+                end_date="2022-12-31",
+                resolution=15,  # Invalid resolution
+            )
+
+        # Invalid cloud cover
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1, 1],
+                start_date="2022-01-01",
+                end_date="2022-12-31",
+                max_cloud_cover=150,  # Out of range
+            )
+
+        # Invalid date range
+        with self.assertRaises(ValueError):
+            client.fetch_s2(
+                bbox=[0, 0, 1, 1],
+                start_date="2022-12-31",
+                end_date="2022-01-01",  # End before start
+            )
+
+    @patch.dict(
+        "os.environ",
+        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
+    )
+    def test_context_manager(self):
+        """Test that client works as a context manager."""
+        with CopernicusClient(load_dotenv_file=False) as client:
+            self.assertIsNotNone(client)
+            self.assertIsNotNone(client.session)
+            self.assertEqual(client.client_id, "test_id")
+
+        # Session should be closed after exiting context
+        # Note: We can't easily test if session is closed without accessing private attributes
+
         with self.assertRaises(ValueError):
             client.fetch_s2(
                 bbox=[0, 0, 1],  # Too few elements
