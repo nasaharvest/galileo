@@ -26,3 +26,10 @@ imgs
 .coverage
 coverage.xml
 htmlcov/
+
+# Environment files with credentials
+.env
+.env.backup
+
+# Marimo session files (may contain user state)
+__marimo__/session/
