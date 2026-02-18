@@ -74,6 +74,10 @@ lint.extend-select = ["I"]
 line-length = 99
 exclude = ["anysat"]
 
+[tool.uv.extra-build-dependencies]
+# Add setuptools as a build dependency for pandas 1.5.3 (required for Python 3.12)
+pandas = ["setuptools>=65.0.0"]
+
 [tool.pytest.ini_options]
 # Pytest configuration
 testpaths = ["tests"]
