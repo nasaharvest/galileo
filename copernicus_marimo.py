@@ -307,10 +307,10 @@ def _(datetime, mo, timedelta):
     # Max products to download (limited to prevent excessive downloads)
     max_products = mo.ui.number(
         start=1,
-        stop=10,
+        stop=50,
         step=1,
         value=2,
-        label="Max Products (1-10)",
+        label="Max Products",
     )
 
     # Crop to bbox option
@@ -367,6 +367,8 @@ def _(
                 **Satellite & Time Range**: Choose satellite type and date range.
                 - **S2 (Sentinel-2)**: Optical imagery, 10m resolution, affected by clouds
                 - **S1 (Sentinel-1)**: Radar imagery, 10m resolution, works through clouds
+
+                **Max Products**: Number of images to download (1-50). Start with 2-5 for testing.
                 """
             ),
             mo.hstack([satellite_type, start_date, end_date, max_products]),
@@ -384,6 +386,14 @@ def _(
                     """
                 ),
                 kind="info",
+            ),
+            mo.callout(
+                mo.md(
+                    """
+                    **Note**: After changing any parameters above, click "Search & Download" again to apply the changes.
+                    """
+                ),
+                kind="warn",
             ),
             search_button,
         ]

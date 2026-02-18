@@ -211,6 +211,7 @@ def fetch_s1_products(
         orbit_direction=orbit_direction_str,
         acquisition_mode=acquisition_mode_str,  # Include acquisition mode in cache key
         download_data=download_data,  # Include download mode in cache key
+        max_products=max_products,  # Include max_products to avoid cache conflicts
     )
 
     # Cache file stores both the search results and file paths
