@@ -475,51 +475,126 @@ def _(
 
                     """
 
-                    # Call appropriate fetch method based on satellite type
-                    if satellite_type.value == "S2":
-                        _spinner.update(title="Searching for Sentinel-2 products...")
-                        # Sentinel-2 parameters:
-                        # - resolution: 10m (highest resolution for RGB bands)
-                        # - max_cloud_cover: 30% (filter out very cloudy images)
-                        # - product_type: S2MSI2A (Level-2A = atmospherically corrected)
-                        downloaded_files = client.fetch_s2(
+                    # Capture stdout to get the "Found X products" message
+                    import io
+                    import sys
+
+                    _stdout_capture = io.StringIO()
+                    _old_stdout = sys.stdout
+                    sys.stdout = _stdout_capture
+
+                    try:
+                        # Call appropriate fetch method based on satellite type
+                        if satellite_type.value == "S2":
+                            _spinner.update(title="Searching for Sentinel-2 products...")
+                            # Sentinel-2 parameters:
+                            # - resolution: 10m (highest resolution for RGB bands)
+                            # - max_cloud_cover: 30% (filter out very cloudy images)
+                            # - product_type: S2MSI2A (Level-2A = atmospherically corrected)
+                            downloaded_files = client.fetch_s2(
+                                bbox=_bbox,
+                                start_date=str(start_date.value),
+                                end_date=str(end_date.value),
+                                resolution=10,
+                                max_cloud_cover=30,
+                                product_type="S2MSI2A",
+                                download_data=True,
+                                interactive=False,
+                                max_products=max_products.value,
+                            )
+                        else:
+                            _spinner.update(title="Searching for Sentinel-1 products...")
+                            # Sentinel-1 parameters:
+                            # - product_type: GRD (Ground Range Detected = processed SAR)
+                            # - polarization: VV,VH (dual-pol for better feature detection)
+                            # - orbit_direction: ASCENDING (consistent viewing geometry)
+                            downloaded_files = client.fetch_s1(
+                                bbox=_bbox,
+                                start_date=str(start_date.value),
+                                end_date=str(end_date.value),
+                                product_type="GRD",
+                                polarization="VV,VH",
+                                orbit_direction="ASCENDING",
+                                download_data=True,
+                                max_products=max_products.value,
+                            )
+                    finally:
+                        # Restore stdout
+                        sys.stdout = _old_stdout
+                        _captured_output = _stdout_capture.getvalue()
+
+                    # Try to get total available from cache file
+                    # The cache stores all products found, not just the ones downloaded
+                    _total_available = None
+                    try:
+                        import json
+
+                        from src.data.copernicus.utils import build_cache_key
+
+                        _cache_key = build_cache_key(
+                            "s2" if satellite_type.value == "S2" else "s1",
                             bbox=_bbox,
                             start_date=str(start_date.value),
                             end_date=str(end_date.value),
-                            resolution=10,
-                            max_cloud_cover=30,
-                            product_type="S2MSI2A",
-                            download_data=True,
-                            interactive=False,
-                            max_products=max_products.value,
-                        )
-                    else:
-                        _spinner.update(title="Searching for Sentinel-1 products...")
-                        # Sentinel-1 parameters:
-                        # - product_type: GRD (Ground Range Detected = processed SAR)
-                        # - polarization: VV,VH (dual-pol for better feature detection)
-                        # - orbit_direction: ASCENDING (consistent viewing geometry)
-                        downloaded_files = client.fetch_s1(
-                            bbox=_bbox,
-                            start_date=str(start_date.value),
-                            end_date=str(end_date.value),
-                            product_type="GRD",
-                            polarization="VV,VH",
-                            orbit_direction="ASCENDING",
+                            resolution=10 if satellite_type.value == "S2" else None,
+                            max_cloud_cover=30 if satellite_type.value == "S2" else None,
+                            product_type="S2MSI2A" if satellite_type.value == "S2" else "GRD",
                             download_data=True,
                             max_products=max_products.value,
+                            polarization="VV,VH" if satellite_type.value == "S1" else None,
+                            orbit_direction="ASCENDING" if satellite_type.value == "S1" else None,
                         )
+                        _cache_file = client.cache_dir / f"{_cache_key}.json"
+
+                        if _cache_file.exists():
+                            with open(_cache_file) as _f:
+                                _cache_data = json.load(_f)
+                                _all_products = _cache_data.get("products", [])
+                                _total_available = len(_all_products)
+                    except Exception as _e:
+                        # If cache reading fails, try parsing stdout
+                        for _line in _captured_output.split("\n"):
+                            if "Found" in _line and "products" in _line:
+                                import re as _re
+
+                                _match = _re.search(r"Found (\d+)", _line)
+                                if _match:
+                                    _total_available = int(_match.group(1))
+                                    break
 
                     # Check if we got any files
                     if downloaded_files and len(downloaded_files) > 0:
                         _spinner.update(title="Download complete!")
-                        download_result += f"""
-                        ✅ **Downloaded {len(downloaded_files)} product(s)!**
 
-                        Files are cached in `data/cache/copernicus/` for future use.
+                        # Show total available vs downloaded
+                        if _total_available is not None and _total_available > len(
+                            downloaded_files
+                        ):
+                            download_result += f"""
+                            ✅ **Downloaded {len(downloaded_files)} of {_total_available} available product(s)!**
 
-                        **Downloaded files:**
-                        """
+                            *Note: {_total_available - len(downloaded_files)} additional product(s) available. Increase "Max Products" to download more.*
+
+                            Files are cached in `data/cache/copernicus/` for future use.
+
+                            **Downloaded files:**
+                            """
+                        elif _total_available is not None:
+                            download_result += f"""
+                            ✅ **Downloaded all {len(downloaded_files)} available product(s)!**
+
+                            Files are cached in `data/cache/copernicus/` for future use.
+
+                            **Downloaded files:**
+                            """
+                        else:
+                            download_result += f"""
+                            ✅ **Downloaded {len(downloaded_files)} product(s)!**
+
+                            Files are cached in `data/cache/copernicus/` for future use.
+
+                            **Downloaded files:**
+                            """
                         for _f in downloaded_files:
                             # Show just the filename, not full path
                             download_result += f"\n- `{_f.name}`"
@@ -785,27 +860,86 @@ def _(
                     _bounds[3],
                 )  # (min_lon, max_lon, min_lat, max_lat)
 
+                # PERFORMANCE FIX: If image is not cropped, crop it now for visualization
+                # This prevents matplotlib from rendering millions of pixels that won't be visible
+                _display_data = None
+                _display_extent = _extent
+
+                # Calculate zoom area with padding
+                _padding = 0.02
+                _zoom_bbox = [
+                    _viz_bbox[0] - _padding,
+                    _viz_bbox[1] - _padding,
+                    _viz_bbox[2] + _padding,
+                    _viz_bbox[3] + _padding,
+                ]
+
+                # Check if we need to crop for visualization (image is larger than zoom area)
+                _needs_crop = (
+                    _bounds[2] - _bounds[0] > _zoom_bbox[2] - _zoom_bbox[0]
+                    or _bounds[3] - _bounds[1] > _zoom_bbox[3] - _zoom_bbox[1]
+                )
+
+                if _needs_crop:
+                    # Crop the image to the zoom area for faster rendering
+                    from src.data.copernicus.image_processing import crop_to_bbox as _crop_fn
+
+                    if satellite_type.value == "S2":
+                        _display_data = _crop_fn(_image_data["rgb_array"], _bounds, _zoom_bbox)
+                    else:
+                        _sar_data = _image_data["sar_array"]
+                        if _sar_data.ndim == 3:
+                            _sar_data = _sar_data[:, :, 0]  # Extract first polarization
+                        _display_data = _crop_fn(_sar_data, _bounds, _zoom_bbox)
+
+                    if _display_data is not None:
+                        # Update extent to match cropped area
+                        _display_extent = (
+                            _zoom_bbox[0],
+                            _zoom_bbox[2],
+                            _zoom_bbox[1],
+                            _zoom_bbox[3],
+                        )
+                    else:
+                        # Cropping failed, fall back to full image
+                        _needs_crop = False
+
                 # Display the image array (already normalized and ready)
                 if satellite_type.value == "S2":
                     # RGB image (H, W, 3)
-                    ax.imshow(_image_data["rgb_array"], extent=_extent, aspect="auto")
+                    if _needs_crop and _display_data is not None:
+                        ax.imshow(_display_data, extent=_display_extent, aspect="auto")
+                    else:
+                        ax.imshow(_image_data["rgb_array"], extent=_extent, aspect="auto")
                 else:
                     # SAR grayscale image (H, W, 1) - squeeze to (H, W)
-                    _sar_data = _image_data["sar_array"]
-                    if _sar_data.ndim == 3:
-                        _sar_data = _sar_data[:, :, 0]  # Extract first polarization
+                    if _needs_crop and _display_data is not None:
+                        # Apply percentile clipping for better visualization
+                        _vmin, _vmax = np.percentile(_display_data, [2, 98])
+                        ax.imshow(
+                            _display_data,
+                            extent=_display_extent,
+                            aspect="auto",
+                            cmap="gray",
+                            vmin=_vmin,
+                            vmax=_vmax,
+                        )
+                    else:
+                        _sar_data = _image_data["sar_array"]
+                        if _sar_data.ndim == 3:
+                            _sar_data = _sar_data[:, :, 0]  # Extract first polarization
 
-                    # Apply percentile clipping for better visualization
-                    _vmin, _vmax = np.percentile(_sar_data, [2, 98])
+                        # Apply percentile clipping for better visualization
+                        _vmin, _vmax = np.percentile(_sar_data, [2, 98])
 
-                    ax.imshow(
-                        _sar_data,
-                        extent=_extent,
-                        aspect="auto",
-                        cmap="gray",
-                        vmin=_vmin,
-                        vmax=_vmax,
-                    )
+                        ax.imshow(
+                            _sar_data,
+                            extent=_extent,
+                            aspect="auto",
+                            cmap="gray",
+                            vmin=_vmin,
+                            vmax=_vmax,
+                        )
 
                 # Add target area overlay
                 _bbox_lons = [
