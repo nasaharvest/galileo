@@ -81,9 +81,19 @@ uv run marimo run copernicus_marimo.py
 
 **Get free Copernicus credentials:**
 1. Visit https://dataspace.copernicus.eu/
-2. Register (no credit card required)
-3. Go to your account settings at: https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings
-4. Copy your Client ID and Client Secret
+2. Register for a free account (no credit card required)
+3. Use your username and password in the GUI or .env file
+
+**Authentication:**
+The Copernicus Data Space Ecosystem uses username/password authentication for downloading satellite data. Simply provide your account credentials:
+
+```bash
+# In your .env file:
+COPERNICUS_USERNAME=your_email@example.com
+COPERNICUS_PASSWORD=your_password
+```
+
+Note: OAuth client credentials (client_id/client_secret) are only needed for Sentinel Hub APIs and are optional for basic data downloads.
 
 The GUI will guide you through credential setup and data download.
 

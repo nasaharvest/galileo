@@ -160,23 +160,23 @@ class TestCopernicusClient(unittest.TestCase):
 
     @patch.dict(
         "os.environ",
-        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
+        {"COPERNICUS_USERNAME": "test_user", "COPERNICUS_PASSWORD": "test_pass"},
     )
     def test_client_init_from_env(self):
         """Test client initialization from environment variables."""
         client = CopernicusClient(load_dotenv_file=False)
-        self.assertEqual(client.client_id, "test_id")
-        self.assertEqual(client.client_secret, "test_secret")
+        self.assertEqual(client.username, "test_user")
+        self.assertEqual(client.password, "test_pass")
 
     def test_client_init_from_params(self):
         """Test client initialization from parameters."""
         client = CopernicusClient(
             load_dotenv_file=False,
-            client_id="param_id",
-            client_secret="param_secret",
+            username="param_user",
+            password="param_pass",
         )
-        self.assertEqual(client.client_id, "param_id")
-        self.assertEqual(client.client_secret, "param_secret")
+        self.assertEqual(client.username, "param_user")
+        self.assertEqual(client.password, "param_pass")
 
     @patch.dict("os.environ", {}, clear=True)
     def test_client_init_missing_credentials(self):
@@ -186,7 +186,7 @@ class TestCopernicusClient(unittest.TestCase):
 
     @patch.dict(
         "os.environ",
-        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
+        {"COPERNICUS_USERNAME": "test_user", "COPERNICUS_PASSWORD": "test_pass"},
     )
     @patch("src.data.copernicus.client.requests.Session")
     def test_get_access_token(self, mock_session_class):
@@ -198,7 +198,8 @@ class TestCopernicusClient(unittest.TestCase):
         mock_response = Mock()
         mock_response.json.return_value = {
             "access_token": "test_token",
-            "expires_in": 3600,
+            "expires_in": 600,
+            "refresh_token": "test_refresh_token",
         }
         mock_session.post.return_value = mock_response
 
@@ -211,7 +212,7 @@ class TestCopernicusClient(unittest.TestCase):
 
     @patch.dict(
         "os.environ",
-        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
+        {"COPERNICUS_USERNAME": "test_user", "COPERNICUS_PASSWORD": "test_pass"},
     )
     def test_fetch_s2_validation(self):
         """Test that fetch_s2 validates input parameters."""
@@ -253,14 +254,14 @@ class TestCopernicusClient(unittest.TestCase):
 
     @patch.dict(
         "os.environ",
-        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
+        {"COPERNICUS_USERNAME": "test_user", "COPERNICUS_PASSWORD": "test_pass"},
     )
     def test_context_manager(self):
         """Test that client works as a context manager."""
         with CopernicusClient(load_dotenv_file=False) as client:
             self.assertIsNotNone(client)
             self.assertIsNotNone(client.session)
-            self.assertEqual(client.client_id, "test_id")
+            self.assertEqual(client.username, "test_user")
 
         # Session should be closed after exiting context
         # Note: We can't easily test if session is closed without accessing private attributes
@@ -304,7 +305,7 @@ class TestS2SearchQuery(unittest.TestCase):
 
     @patch.dict(
         "os.environ",
-        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
+        {"COPERNICUS_USERNAME": "test_user", "COPERNICUS_PASSWORD": "test_pass"},
     )
     @patch("src.data.copernicus.client.requests.Session")
     @patch("src.data.copernicus.s2._search_s2_products")
