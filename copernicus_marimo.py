@@ -524,22 +524,131 @@ def _(
 
 
 @app.cell
+def _(datetime, downloaded_files, mo):
+    """Create time slider for navigating through downloaded images.
+
+    This cell creates a slider widget that allows users to navigate
+    through multiple satellite images ordered by acquisition time.
+    """
+    time_slider = None
+    file_metadata = []
+
+    if downloaded_files and len(downloaded_files) > 0:
+        # Extract dates from filenames and create metadata
+        # Sentinel filenames contain acquisition date in format: YYYYMMDDTHHMMSS
+        import re
+
+        for _file_path in downloaded_files:
+            _filename = _file_path.name
+            # Try to extract date from filename
+            # S2 format: S2A_MSIL2A_YYYYMMDDTHHMMSS_...
+            # S1 format: S1A_IW_GRDH_1SDV_YYYYMMDDTHHMMSS_...
+            _date_match = re.search(r"(\d{8}T\d{6})", _filename)
+            if _date_match:
+                _date_str = _date_match.group(1)
+                # Parse to readable format
+                _date_obj = datetime.strptime(_date_str, "%Y%m%dT%H%M%S")
+                file_metadata.append(
+                    {
+                        "path": _file_path,
+                        "date": _date_obj,
+                        "date_str": _date_obj.strftime("%Y-%m-%d %H:%M"),
+                        "filename": _filename,
+                    }
+                )
+            else:
+                # Fallback if date not found
+                file_metadata.append(
+                    {
+                        "path": _file_path,
+                        "date": None,
+                        "date_str": "Unknown date",
+                        "filename": _filename,
+                    }
+                )
+
+        # Sort by date (oldest first)
+        file_metadata.sort(key=lambda x: x["date"] if x["date"] else datetime.min)
+
+        # Create slider if we have multiple files
+        if len(file_metadata) > 1:
+            time_slider = mo.ui.slider(
+                start=0,
+                stop=len(file_metadata) - 1,
+                step=1,
+                value=0,
+                label=f"Time Step (1 of {len(file_metadata)})",
+                show_value=False,
+            )
+
+    return file_metadata, time_slider
+
+
+@app.cell
+def _(file_metadata, mo, time_slider):
+    """Display time slider controls and current image info."""
+    slider_display = None
+
+    if time_slider is not None and len(file_metadata) > 1:
+        # Get current selection
+        _current_idx = time_slider.value
+        _current_meta = file_metadata[_current_idx]
+
+        # Display slider with metadata
+        slider_display = mo.vstack(
+            [
+                mo.md(
+                    f"""
+                    ---
+                    ## 📅 Time Series Visualization
+
+                    Navigate through {len(file_metadata)} images using the slider below.
+                    """
+                ),
+                time_slider,
+                mo.md(
+                    f"""
+                    **Image {_current_idx + 1} of {len(file_metadata)}**
+                    - **Date**: {_current_meta['date_str']}
+                    - **File**: `{_current_meta['filename']}`
+                    """
+                ),
+            ]
+        )
+    elif file_metadata and len(file_metadata) == 1:
+        # Single image - no slider needed
+        slider_display = mo.md(
+            f"""
+            ---
+            ## 📅 Satellite Image
+
+            **Date**: {file_metadata[0]['date_str']}
+            **File**: `{file_metadata[0]['filename']}`
+            """
+        )
+
+    slider_display
+    return
+
+
+@app.cell
 def _(
-    downloaded_files,
+    file_metadata,
     max_lat,
     max_lon,
     min_lat,
     min_lon,
     mo,
     satellite_type,
+    time_slider,
     traceback,
 ):
-    """Visualize downloaded satellite imagery.
+    """Visualize the selected satellite image based on slider position.
 
     This cell:
-    1. Checks if there are downloaded files to visualize
+    1. Gets the currently selected image from the slider
     2. Imports visualization functions
-    3. Creates matplotlib subplots (max 2 images side-by-side)
+    3. Creates a matplotlib figure for the selected image
     4. Calls appropriate visualization function (S2=RGB, S1=SAR)
     5. Displays the resulting figure
 
@@ -550,8 +659,8 @@ def _(
     """
     viz_result = None
 
-    # Only visualize if we have downloaded files
-    if downloaded_files and len(downloaded_files) > 0:
+    # Only visualize if we have files
+    if file_metadata and len(file_metadata) > 0:
         try:
             # Import visualization libraries
             import matplotlib.pyplot as plt
@@ -561,56 +670,55 @@ def _(
             # Get bbox for cropping and overlay
             _viz_bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
 
-            # Limit to 2 images to keep visualization manageable
-            num_files = min(len(downloaded_files), 2)
+            # Determine which image to display
+            if time_slider is not None:
+                # Use slider value
+                _selected_idx = time_slider.value
+            else:
+                # No slider (single image)
+                _selected_idx = 0
 
-            # Create subplot grid (1 row, up to 2 columns)
-            fig, axes = plt.subplots(1, num_files, figsize=(12, 6))
-            if num_files == 1:
-                axes = [axes]  # Make it a list for consistent indexing
+            # Get the file to display
+            _selected_file = file_metadata[_selected_idx]["path"]
 
-            # Render each file
-            for idx, file_path in enumerate(downloaded_files[:num_files]):
-                if satellite_type.value == "S2":
-                    # Sentinel-2: Display RGB composite
-                    # This extracts B04 (Red), B03 (Green), B02 (Blue) bands
-                    # and creates a natural color image
-                    result_ax = display_satellite_image(file_path, _viz_bbox, ax=axes[idx])
+            # Create figure
+            fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
-                    if result_ax is None:
-                        # Visualization failed (e.g., corrupt file, missing bands)
-                        axes[idx].text(
-                            0.5,
-                            0.5,
-                            "⚠️ Image extraction failed\n\nFile may be corrupt or incomplete",
-                            ha="center",
-                            va="center",
-                            transform=axes[idx].transAxes,
-                            fontsize=12,
-                        )
-                        axes[idx].set_title(f"Product {idx+1}: Error")
-                else:
-                    # Sentinel-1: Display SAR image (VV polarization)
-                    # VV = Vertical transmit, Vertical receive
-                    # Good for water detection, urban areas, soil moisture
-                    result_ax = display_sar_image(
-                        file_path, _viz_bbox, ax=axes[idx], polarization="VV"
+            # Render the image
+            if satellite_type.value == "S2":
+                # Sentinel-2: Display RGB composite
+                result_ax = display_satellite_image(_selected_file, _viz_bbox, ax=ax)
+
+                if result_ax is None:
+                    # Visualization failed
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "⚠️ Image extraction failed\n\nFile may be corrupt or incomplete",
+                        ha="center",
+                        va="center",
+                        transform=ax.transAxes,
+                        fontsize=12,
                     )
+                    ax.set_title("Error")
+            else:
+                # Sentinel-1: Display SAR image (VV polarization)
+                result_ax = display_sar_image(_selected_file, _viz_bbox, ax=ax, polarization="VV")
 
-                    if result_ax is None:
-                        # Visualization failed
-                        axes[idx].text(
-                            0.5,
-                            0.5,
-                            "⚠️ SAR extraction failed\n\nFile may be corrupt or incomplete",
-                            ha="center",
-                            va="center",
-                            transform=axes[idx].transAxes,
-                            fontsize=12,
-                        )
-                        axes[idx].set_title(f"Product {idx+1}: Error")
+                if result_ax is None:
+                    # Visualization failed
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "⚠️ SAR extraction failed\n\nFile may be corrupt or incomplete",
+                        ha="center",
+                        va="center",
+                        transform=ax.transAxes,
+                        fontsize=12,
+                    )
+                    ax.set_title("Error")
 
-            # Adjust spacing between subplots
+            # Adjust layout
             plt.tight_layout()
 
             # Set result to figure for Marimo to display
@@ -640,7 +748,6 @@ def _(
             print(traceback.format_exc())
 
     # Return the figure for Marimo to display
-    # (None if no files to visualize)
     viz_result
     return
 
