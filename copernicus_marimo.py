@@ -254,6 +254,7 @@ def _(datetime, mo, timedelta):
     - Date range: Last 30 days
     - Satellite: Sentinel-2 (optical)
     - Max products: 2 (to keep download size manageable)
+    - Crop to bbox: False (show full context by default)
     """
     # Calculate default date range (last 30 days)
     default_end_date = datetime.now().strftime("%Y-%m-%d")
@@ -312,10 +313,19 @@ def _(datetime, mo, timedelta):
         label="Max Products (1-10)",
     )
 
+    # Crop to bbox option
+    # When enabled: Only shows target area (faster, less memory)
+    # When disabled: Shows full tile with context (slower, more memory)
+    crop_to_bbox = mo.ui.checkbox(
+        value=False,
+        label="Crop to target area only (faster, less memory)",
+    )
+
     # Search button triggers the search and download
     search_button = mo.ui.run_button(label="🔍 Search & Download")
 
     return (
+        crop_to_bbox,
         end_date,
         max_lat,
         max_lon,
@@ -330,6 +340,7 @@ def _(datetime, mo, timedelta):
 
 @app.cell
 def _(
+    crop_to_bbox,
     end_date,
     max_lat,
     max_lon,
@@ -359,6 +370,21 @@ def _(
                 """
             ),
             mo.hstack([satellite_type, start_date, end_date, max_products]),
+            mo.md(
+                """
+                **Visualization Options**:
+                """
+            ),
+            crop_to_bbox,
+            mo.callout(
+                mo.md(
+                    """
+                    **Tip**: Unchecked (default) shows full satellite tile with context around your target area.
+                    Check the box if you only want to see the target area (uses less memory, good for many images).
+                    """
+                ),
+                kind="info",
+            ),
             search_button,
         ]
     )
@@ -524,64 +550,122 @@ def _(
 
 
 @app.cell
-def _(datetime, downloaded_files, mo):
-    """Create time slider for navigating through downloaded images.
+def _(
+    crop_to_bbox,
+    datetime,
+    downloaded_files,
+    max_lat,
+    max_lon,
+    min_lat,
+    min_lon,
+    mo,
+    satellite_type,
+):
+    """Create time slider and pre-process all images for fast rendering.
 
-    This cell creates a slider widget that allows users to navigate
-    through multiple satellite images ordered by acquisition time.
+    This cell:
+    1. Extracts dates from filenames and creates metadata
+    2. Pre-processes ALL images into memory (cached)
+    3. Creates slider widget for navigation
+
+    Pre-processing happens once, making slider interactions instant.
+    The crop_to_bbox option controls whether to show full context or just target area.
     """
     time_slider = None
     file_metadata = []
+    cached_images = []
 
     if downloaded_files and len(downloaded_files) > 0:
-        # Extract dates from filenames and create metadata
-        # Sentinel filenames contain acquisition date in format: YYYYMMDDTHHMMSS
-        import re
+        # Show progress while pre-processing
+        with mo.status.spinner(title="Pre-processing images for fast slider...") as _spinner:
+            import re
 
-        for _file_path in downloaded_files:
-            _filename = _file_path.name
-            # Try to extract date from filename
-            # S2 format: S2A_MSIL2A_YYYYMMDDTHHMMSS_...
-            # S1 format: S1A_IW_GRDH_1SDV_YYYYMMDDTHHMMSS_...
-            _date_match = re.search(r"(\d{8}T\d{6})", _filename)
-            if _date_match:
-                _date_str = _date_match.group(1)
-                # Parse to readable format
-                _date_obj = datetime.strptime(_date_str, "%Y%m%dT%H%M%S")
-                file_metadata.append(
-                    {
-                        "path": _file_path,
-                        "date": _date_obj,
-                        "date_str": _date_obj.strftime("%Y-%m-%d %H:%M"),
-                        "filename": _filename,
-                    }
-                )
-            else:
-                # Fallback if date not found
-                file_metadata.append(
-                    {
-                        "path": _file_path,
-                        "date": None,
-                        "date_str": "Unknown date",
-                        "filename": _filename,
-                    }
-                )
+            # Get bbox for optional cropping
+            _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
+            _use_bbox = crop_to_bbox.value  # User's choice
 
-        # Sort by date (oldest first)
-        file_metadata.sort(key=lambda x: x["date"] if x["date"] else datetime.min)
+            # Extract dates and pre-process images
+            for _idx, _file_path in enumerate(downloaded_files):
+                _spinner.update(title=f"Processing image {_idx + 1}/{len(downloaded_files)}...")
 
-        # Create slider if we have multiple files
-        if len(file_metadata) > 1:
-            time_slider = mo.ui.slider(
-                start=0,
-                stop=len(file_metadata) - 1,
-                step=1,
-                value=0,
-                label=f"Time Step (1 of {len(file_metadata)})",
-                show_value=False,
+                _filename = _file_path.name
+
+                # Extract date from filename
+                _date_match = re.search(r"(\d{8}T\d{6})", _filename)
+                if _date_match:
+                    _date_str = _date_match.group(1)
+                    _date_obj = datetime.strptime(_date_str, "%Y%m%dT%H%M%S")
+                    _date_display = _date_obj.strftime("%Y-%m-%d %H:%M")
+                else:
+                    _date_obj = None
+                    _date_display = "Unknown date"
+
+                # Pre-process the image based on satellite type
+                _processed_data = None
+                try:
+                    if satellite_type.value == "S2":
+                        # Sentinel-2: Extract RGB composite
+                        from src.data.copernicus.image_processing import extract_rgb_composite
+
+                        _processed_data = extract_rgb_composite(
+                            _file_path, bbox=_bbox if _use_bbox else None
+                        )
+                    else:
+                        # Sentinel-1: Extract SAR data (VV polarization)
+                        from src.data.copernicus.image_processing import extract_sar_composite
+
+                        _processed_data = extract_sar_composite(
+                            _file_path,
+                            polarizations=["VV"],
+                            bbox=_bbox if _use_bbox else None,
+                        )
+
+                    if _processed_data is not None:
+                        # Store metadata and cached image data
+                        file_metadata.append(
+                            {
+                                "path": _file_path,
+                                "date": _date_obj,
+                                "date_str": _date_display,
+                                "filename": _filename,
+                            }
+                        )
+                        cached_images.append(_processed_data)
+                    else:
+                        print(f"Warning: Failed to process {_filename}")
+
+                except Exception as _e:
+                    print(f"Error processing {_filename}: {_e}")
+                    import traceback as _tb
+
+                    _tb.print_exc()
+                    continue
+
+            _spinner.update(title="Processing complete!")
+
+        # Sort by date (oldest first) - sort both lists together
+        if file_metadata:
+            _sorted_pairs = sorted(
+                zip(file_metadata, cached_images),
+                key=lambda x: x[0]["date"] if x[0]["date"] else datetime.min,
+            )
+            file_metadata, cached_images = (
+                [x[0] for x in _sorted_pairs],
+                [x[1] for x in _sorted_pairs],
             )
 
-    return file_metadata, time_slider
+            # Create slider if we have multiple files
+            if len(file_metadata) > 1:
+                time_slider = mo.ui.slider(
+                    start=0,
+                    stop=len(file_metadata) - 1,
+                    step=1,
+                    value=0,
+                    label=f"Time Step (1 of {len(file_metadata)})",
+                    show_value=False,
+                )
+
+    return cached_images, file_metadata, time_slider
 
 
 @app.cell
@@ -633,6 +717,7 @@ def _(file_metadata, mo, time_slider):
 
 @app.cell
 def _(
+    cached_images,
     file_metadata,
     max_lat,
     max_lon,
@@ -643,31 +728,26 @@ def _(
     time_slider,
     traceback,
 ):
-    """Visualize the selected satellite image based on slider position.
+    """Visualize the selected satellite image using cached data.
 
-    This cell:
-    1. Gets the currently selected image from the slider
-    2. Imports visualization functions
-    3. Creates a matplotlib figure for the selected image
-    4. Calls appropriate visualization function (S2=RGB, S1=SAR)
-    5. Displays the resulting figure
+    This cell displays pre-processed images from cache, making slider
+    interactions nearly instant (no disk I/O or processing needed).
 
     Visualization details:
     - S2: RGB composite (natural color) with target bbox overlay
     - S1: VV polarization (grayscale) with adaptive contrast
-    - Both: Cropped to target bbox for focused view
+    - Both: Already cropped to target bbox during pre-processing
     """
     viz_result = None
 
-    # Only visualize if we have files
-    if file_metadata and len(file_metadata) > 0:
+    # Only visualize if we have cached images
+    if cached_images and len(cached_images) > 0:
         try:
             # Import visualization libraries
             import matplotlib.pyplot as plt
+            import numpy as np
 
-            from src.data.copernicus import display_sar_image, display_satellite_image
-
-            # Get bbox for cropping and overlay
+            # Get bbox for overlay
             _viz_bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
 
             # Determine which image to display
@@ -678,45 +758,95 @@ def _(
                 # No slider (single image)
                 _selected_idx = 0
 
-            # Get the file to display
-            _selected_file = file_metadata[_selected_idx]["path"]
+            # Get the cached image data (already processed!)
+            _image_data = cached_images[_selected_idx]
+            _metadata = file_metadata[_selected_idx]
 
             # Create figure
             fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
-            # Render the image
-            if satellite_type.value == "S2":
-                # Sentinel-2: Display RGB composite
-                result_ax = display_satellite_image(_selected_file, _viz_bbox, ax=ax)
+            # Display the cached image
+            if _image_data is not None:
+                _bounds = _image_data["bounds_wgs84"]
+                _extent = (
+                    _bounds[0],
+                    _bounds[2],
+                    _bounds[1],
+                    _bounds[3],
+                )  # (min_lon, max_lon, min_lat, max_lat)
 
-                if result_ax is None:
-                    # Visualization failed
-                    ax.text(
-                        0.5,
-                        0.5,
-                        "⚠️ Image extraction failed\n\nFile may be corrupt or incomplete",
-                        ha="center",
-                        va="center",
-                        transform=ax.transAxes,
-                        fontsize=12,
+                # Display the image array (already normalized and ready)
+                if satellite_type.value == "S2":
+                    # RGB image (H, W, 3)
+                    ax.imshow(_image_data["rgb_array"], extent=_extent, aspect="auto")
+                else:
+                    # SAR grayscale image (H, W, 1) - squeeze to (H, W)
+                    _sar_data = _image_data["sar_array"]
+                    if _sar_data.ndim == 3:
+                        _sar_data = _sar_data[:, :, 0]  # Extract first polarization
+
+                    # Apply percentile clipping for better visualization
+                    _vmin, _vmax = np.percentile(_sar_data, [2, 98])
+
+                    ax.imshow(
+                        _sar_data,
+                        extent=_extent,
+                        aspect="auto",
+                        cmap="gray",
+                        vmin=_vmin,
+                        vmax=_vmax,
                     )
-                    ax.set_title("Error")
+
+                # Add target area overlay
+                _bbox_lons = [
+                    _viz_bbox[0],
+                    _viz_bbox[2],
+                    _viz_bbox[2],
+                    _viz_bbox[0],
+                    _viz_bbox[0],
+                ]
+                _bbox_lats = [
+                    _viz_bbox[1],
+                    _viz_bbox[1],
+                    _viz_bbox[3],
+                    _viz_bbox[3],
+                    _viz_bbox[1],
+                ]
+                ax.plot(
+                    _bbox_lons,
+                    _bbox_lats,
+                    "red",
+                    linewidth=3,
+                    alpha=0.8,
+                    label="Target Area",
+                )
+
+                # Zoom to target area with padding
+                _padding = 0.02
+                ax.set_xlim(_viz_bbox[0] - _padding, _viz_bbox[2] + _padding)
+                ax.set_ylim(_viz_bbox[1] - _padding, _viz_bbox[3] + _padding)
+
+                # Customize plot
+                ax.set_xlabel("Longitude (°E)", fontsize=12)
+                ax.set_ylabel("Latitude (°N)", fontsize=12)
+
+                _title = f"{satellite_type.value} Image - {_metadata['date_str']}\n{_metadata['filename'][:50]}..."
+                ax.set_title(_title, fontsize=11, fontweight="bold")
+
+                ax.grid(True, alpha=0.3, color="white")
+                ax.legend()
             else:
-                # Sentinel-1: Display SAR image (VV polarization)
-                result_ax = display_sar_image(_selected_file, _viz_bbox, ax=ax, polarization="VV")
-
-                if result_ax is None:
-                    # Visualization failed
-                    ax.text(
-                        0.5,
-                        0.5,
-                        "⚠️ SAR extraction failed\n\nFile may be corrupt or incomplete",
-                        ha="center",
-                        va="center",
-                        transform=ax.transAxes,
-                        fontsize=12,
-                    )
-                    ax.set_title("Error")
+                # Visualization failed
+                ax.text(
+                    0.5,
+                    0.5,
+                    "⚠️ Image data unavailable\n\nProcessing may have failed",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                    fontsize=12,
+                )
+                ax.set_title("Error")
 
             # Adjust layout
             plt.tight_layout()
@@ -731,14 +861,13 @@ def _(
                 f"""
                 ## ❌ Visualization Error
 
-                Failed to visualize the downloaded imagery.
+                Failed to visualize the cached imagery.
 
                 **Error**: {_error_msg}
 
                 **Possible causes:**
-                - Corrupt or incomplete download
-                - Missing required bands in the product
-                - Insufficient memory for large images
+                - Cached data format issue
+                - Insufficient memory for images
 
                 Check the console for detailed error information.
                 """
