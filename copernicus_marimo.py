@@ -37,18 +37,16 @@ def _(mo):
     # Copernicus Data Space Ecosystem Explorer
 
     This interactive GUI allows you to:
-    1. **Configure credentials** - Save your Copernicus API credentials securely
+    1. **Configure credentials** - Save your Copernicus account credentials securely
     2. **Search for data** - Find Sentinel-1 (SAR) or Sentinel-2 (optical) imagery
     3. **Download & visualize** - Automatically download and display satellite images
 
     ## Getting Started
 
-    **Get free Copernicus credentials:**
+    **Get free Copernicus account:**
     1. Visit: https://dataspace.copernicus.eu/
     2. Click "Register" (no credit card required)
-    3. After registration, go to your account settings at:
-       **https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings**
-    4. Copy your Client ID and Client Secret below
+    3. Use your account username/email and password below
 
     **About the satellites:**
     - **Sentinel-2 (S2)**: Optical imagery (like a camera), best for seeing colors, vegetation, water
@@ -63,32 +61,33 @@ def _(Path):
     """Check if Copernicus credentials are already configured in .env file.
 
     This cell reads the .env file (if it exists) and checks for valid
-    COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET entries.
+    COPERNICUS_USERNAME and COPERNICUS_PASSWORD entries (required).
+    OAuth credentials (CLIENT_ID/CLIENT_SECRET) are optional.
     """
     env_path = Path(".env")
     env_exists = env_path.exists()
 
     # Initialize credential flags
-    has_client_id = False
-    has_client_secret = False
+    has_username = False
+    has_password = False
 
     # If .env exists, check if it has valid credentials
     if env_exists:
         with open(env_path, "r") as _f:
             content = _f.read()
-            # Check for CLIENT_ID (must have non-empty value)
-            has_client_id = (
-                "COPERNICUS_CLIENT_ID=" in content
-                and len(content.split("COPERNICUS_CLIENT_ID=")[1].split("\n")[0].strip()) > 0
+            # Check for USERNAME (must have non-empty value)
+            has_username = (
+                "COPERNICUS_USERNAME=" in content
+                and len(content.split("COPERNICUS_USERNAME=")[1].split("\n")[0].strip()) > 0
             )
-            # Check for CLIENT_SECRET (must have non-empty value)
-            has_client_secret = (
-                "COPERNICUS_CLIENT_SECRET=" in content
-                and len(content.split("COPERNICUS_CLIENT_SECRET=")[1].split("\n")[0].strip()) > 0
+            # Check for PASSWORD (must have non-empty value)
+            has_password = (
+                "COPERNICUS_PASSWORD=" in content
+                and len(content.split("COPERNICUS_PASSWORD=")[1].split("\n")[0].strip()) > 0
             )
 
-    # Credentials are configured only if both are present and non-empty
-    credentials_configured = has_client_id and has_client_secret
+    # Credentials are configured only if both username and password are present
+    credentials_configured = has_username and has_password
 
     return credentials_configured, env_path
 
@@ -117,49 +116,49 @@ def _(credentials_configured, mo):
             """
             ## ⚠️ Credentials Required
 
-            Please enter your Copernicus API credentials below.
+            Please enter your Copernicus account credentials below.
             These will be saved securely in a `.env` file.
 
-            **Don't have credentials yet?**
+            **Don't have an account yet?**
             1. Register for free at: https://dataspace.copernicus.eu/
-            2. Get your credentials at: https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings
+            2. Use your account username/email and password below
             """
         )
 
     # Create input widgets (password type hides the values for security)
-    client_id_input = mo.ui.text(
-        label="Client ID",
-        kind="password",
-        placeholder="Enter your Client ID from Copernicus",
+    username_input = mo.ui.text(
+        label="Username/Email",
+        kind="text",
+        placeholder="Enter your Copernicus username or email",
     )
-    client_secret_input = mo.ui.text(
-        label="Client Secret",
+    password_input = mo.ui.text(
+        label="Password",
         kind="password",
-        placeholder="Enter your Client Secret from Copernicus",
+        placeholder="Enter your Copernicus password",
     )
     save_button = mo.ui.run_button(label="💾 Save Credentials")
 
     # Display the form vertically stacked
-    mo.vstack([status_msg, client_id_input, client_secret_input, save_button])
-    return client_id_input, client_secret_input, save_button
+    mo.vstack([status_msg, username_input, password_input, save_button])
+    return password_input, save_button, username_input
 
 
 @app.cell
 def _(
-    client_id_input,
-    client_secret_input,
     env_path,
     mo,
     os,
+    password_input,
     save_button,
     traceback,
+    username_input,
 ):
     """Save credentials to .env file when Save button is clicked.
 
     This cell:
     1. Validates that both fields are filled
     2. Preserves any existing .env variables (doesn't overwrite other settings)
-    3. Writes COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET
+    3. Writes COPERNICUS_USERNAME and COPERNICUS_PASSWORD
     4. Sets credentials in current environment for immediate use
     """
     save_result = ""
@@ -167,15 +166,15 @@ def _(
     # Only process if save button was clicked
     if save_button.value:
         # Get values from input fields
-        client_id = client_id_input.value
-        client_secret = client_secret_input.value
+        username = username_input.value
+        password = password_input.value
 
         # Validate that both fields have values
-        if not client_id or not client_secret:
+        if not username or not password:
             save_result = """
             ❌ **Error: Both fields are required**
 
-            Please enter both your Client ID and Client Secret.
+            Please enter both your username/email and password.
             """
         else:
             try:
@@ -190,8 +189,8 @@ def _(
                             [
                                 line
                                 for line in lines
-                                if not line.startswith("COPERNICUS_CLIENT_ID=")
-                                and not line.startswith("COPERNICUS_CLIENT_SECRET=")
+                                if not line.startswith("COPERNICUS_USERNAME=")
+                                and not line.startswith("COPERNICUS_PASSWORD=")
                             ]
                         )
 
@@ -201,13 +200,13 @@ def _(
                     # Ensure newline before adding credentials
                     if existing_content and not existing_content.endswith("\n"):
                         _f.write("\n")
-                    _f.write(f"COPERNICUS_CLIENT_ID={client_id}\n")
-                    _f.write(f"COPERNICUS_CLIENT_SECRET={client_secret}\n")
+                    _f.write(f"COPERNICUS_USERNAME={username}\n")
+                    _f.write(f"COPERNICUS_PASSWORD={password}\n")
 
                 # Also set in current environment for immediate use
                 # (so you don't need to restart the app)
-                os.environ["COPERNICUS_CLIENT_ID"] = client_id
-                os.environ["COPERNICUS_CLIENT_SECRET"] = client_secret
+                os.environ["COPERNICUS_USERNAME"] = username
+                os.environ["COPERNICUS_PASSWORD"] = password
 
                 save_result = """
                 ✅ **Credentials saved successfully!**
@@ -705,7 +704,10 @@ def _(
                             bbox=_bbox if _use_bbox else None,
                         )
 
-                    if _processed_data is not None:
+                    if (
+                        _processed_data is not None
+                        and _processed_data.get("bounds_wgs84") is not None
+                    ):
                         # Store metadata and cached image data
                         file_metadata.append(
                             {
@@ -717,7 +719,7 @@ def _(
                         )
                         cached_images.append(_processed_data)
                     else:
-                        print(f"Warning: Failed to process {_filename}")
+                        print(f"Warning: Failed to process {_filename} (missing bounds or data)")
 
                 except Exception as _e:
                     print(f"Error processing {_filename}: {_e}")
@@ -774,7 +776,13 @@ def _(file_metadata, mo, time_slider):
                     Navigate through {len(file_metadata)} images using the slider below.
                     """
                 ),
-                time_slider,
+                mo.Html(
+                    f"""
+                    <div style="width: 100%; padding: 20px 0;">
+                        {time_slider}
+                    </div>
+                    """
+                ),
                 mo.md(
                     f"""
                     **Image {_current_idx + 1} of {len(file_metadata)}**
@@ -851,7 +859,7 @@ def _(
             fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
             # Display the cached image
-            if _image_data is not None:
+            if _image_data is not None and _image_data.get("bounds_wgs84") is not None:
                 _bounds = _image_data["bounds_wgs84"]
                 _extent = (
                     _bounds[0],
