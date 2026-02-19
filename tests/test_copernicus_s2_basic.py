@@ -348,10 +348,6 @@ class TestS2SearchQuery(unittest.TestCase):
 class TestCaching(unittest.TestCase):
     """Test caching behavior."""
 
-    @patch.dict(
-        "os.environ",
-        {"COPERNICUS_CLIENT_ID": "test_id", "COPERNICUS_CLIENT_SECRET": "test_secret"},
-    )
     def test_cache_key_includes_all_params(self):
         """Test that cache keys include all relevant parameters."""
 
