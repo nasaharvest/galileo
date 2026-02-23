@@ -90,12 +90,10 @@ uv run marimo run copernicus_marimo.py
 The Copernicus Data Space Ecosystem uses username/password authentication for downloading satellite data via the OData catalog API. Simply provide your account credentials:
 
 ```bash
-# In your .env file (required):
+# In your .env file:
 COPERNICUS_USERNAME=your_email@example.com
 COPERNICUS_PASSWORD=your_password
 ```
-
-Note: OAuth client credentials (CLIENT_ID/CLIENT_SECRET) are only needed for Sentinel Hub APIs and are optional for basic data downloads.
 
 The GUI will guide you through credential setup and data download.
 

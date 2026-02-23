@@ -61,8 +61,7 @@ def _(Path):
     """Check if Copernicus credentials are already configured in .env file.
 
     This cell reads the .env file (if it exists) and checks for valid
-    COPERNICUS_USERNAME and COPERNICUS_PASSWORD entries (required).
-    OAuth credentials (CLIENT_ID/CLIENT_SECRET) are optional.
+    COPERNICUS_USERNAME and COPERNICUS_PASSWORD entries.
     """
     env_path = Path(".env")
     env_exists = env_path.exists()

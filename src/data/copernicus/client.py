@@ -60,14 +60,11 @@ class CopernicusClient:
         load_dotenv_file: bool = True,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None,
     ) -> None:
         """Initialize the Copernicus client with authentication and caching setup.
 
         The Copernicus Data Space Ecosystem uses username/password authentication for
-        the OData catalog and download APIs. OAuth client credentials are only needed
-        for Sentinel Hub APIs.
+        the OData catalog and download APIs.
 
         Args:
             cache_dir: Directory where downloaded files and metadata will be cached.
@@ -76,8 +73,6 @@ class CopernicusClient:
                              Set to False if you're providing credentials directly.
             username: Copernicus account username/email. If None, loads from COPERNICUS_USERNAME env var.
             password: Copernicus account password. If None, loads from COPERNICUS_PASSWORD env var.
-            client_id: OAuth client ID (for Sentinel Hub). If None, loads from COPERNICUS_CLIENT_ID env var.
-            client_secret: OAuth client secret (for Sentinel Hub). If None, loads from COPERNICUS_CLIENT_SECRET env var.
 
         Raises:
             ValueError: If username/password credentials cannot be found.
@@ -96,12 +91,6 @@ class CopernicusClient:
         username_from_env: Optional[str] = username or os.getenv("COPERNICUS_USERNAME")
         password_from_env: Optional[str] = password or os.getenv("COPERNICUS_PASSWORD")
 
-        # OAuth credentials are optional (only needed for Sentinel Hub)
-        client_id_from_env: Optional[str] = client_id or os.getenv("COPERNICUS_CLIENT_ID")
-        client_secret_from_env: Optional[str] = client_secret or os.getenv(
-            "COPERNICUS_CLIENT_SECRET"
-        )
-
         # Validate that we have the required username/password credentials
         if not username_from_env or not password_from_env:
             raise ValueError(
@@ -112,8 +101,6 @@ class CopernicusClient:
 
         self.username: str = username_from_env
         self.password: str = password_from_env
-        self.client_id: Optional[str] = client_id_from_env
-        self.client_secret: Optional[str] = client_secret_from_env
 
         # OAuth token management - these will be set when we first authenticate
         self._access_token: Optional[str] = None  # The actual Bearer token
@@ -177,6 +164,10 @@ class CopernicusClient:
                 self._access_token = token_data["access_token"]  # The actual token string
                 self._refresh_token = token_data.get("refresh_token")  # Save refresh token
 
+                # Validate we got a non-empty token
+                if not self._access_token:
+                    raise ValueError("Received empty access token from API")
+
                 # Calculate when this token expires and set expiry with 5 minute buffer
                 expires_in = token_data.get("expires_in", 600)  # Default to 10 minutes
                 self._token_expires_at = (
@@ -193,8 +184,6 @@ class CopernicusClient:
                 print(f"  - Scope: {token_scope}")
                 print(f"  - Has refresh token: {self._refresh_token is not None}")
 
-                # At this point we're guaranteed to have a valid token
-                assert self._access_token is not None
                 return self._access_token
             else:
                 print("❌ Token response missing 'access_token' field")
@@ -239,12 +228,15 @@ class CopernicusClient:
                 self._access_token = token_data["access_token"]
                 self._refresh_token = token_data.get("refresh_token", self._refresh_token)
 
+                # Validate we got a non-empty token
+                if not self._access_token:
+                    raise ValueError("Received empty access token from refresh")
+
                 expires_in = token_data.get("expires_in", 600)
                 self._token_expires_at = time.time() + expires_in - 300
 
                 print(f"🔄 Refreshed access token (expires in {expires_in}s)")
 
-                assert self._access_token is not None
                 return self._access_token
             else:
                 raise ValueError("Invalid refresh token response")
