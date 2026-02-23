@@ -162,7 +162,9 @@ class CopernicusClient:
             # Debug: Show token details
             if "access_token" in token_data:
                 self._access_token = token_data["access_token"]  # The actual token string
-                self._refresh_token = token_data.get("refresh_token")  # Save refresh token
+                self._refresh_token = token_data.get(
+                    "refresh_token", None
+                )  # Save refresh token (optional)
 
                 # Validate we got a non-empty token
                 if not self._access_token:
