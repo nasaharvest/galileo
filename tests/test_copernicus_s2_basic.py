@@ -178,6 +178,21 @@ class TestCopernicusClient(unittest.TestCase):
         self.assertEqual(client.username, "param_user")
         self.assertEqual(client.password, "param_pass")
 
+    @patch.dict(
+        "os.environ",
+        {"COPERNICUS_USERNAME": "env_user", "COPERNICUS_PASSWORD": "env_pass"},
+    )
+    def test_client_init_params_override_env(self):
+        """Test that parameters take precedence over environment variables."""
+        client = CopernicusClient(
+            load_dotenv_file=False,
+            username="param_user",
+            password="param_pass",
+        )
+        # Parameters should override environment variables
+        self.assertEqual(client.username, "param_user")
+        self.assertEqual(client.password, "param_pass")
+
     @patch.dict("os.environ", {}, clear=True)
     def test_client_init_missing_credentials(self):
         """Test that missing credentials raise ValueError."""
