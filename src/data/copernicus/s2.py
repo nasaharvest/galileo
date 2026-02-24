@@ -87,6 +87,7 @@ def fetch_s2_products(
         max_cloud_cover=max_cloud_cover,
         product_type=product_type,
         download_data=download_data,  # Include download mode in cache key
+        max_products=max_products,  # Include max_products to avoid cache conflicts
     )
 
     # Cache file stores both the search results and file paths

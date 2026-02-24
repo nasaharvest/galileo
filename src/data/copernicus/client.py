@@ -58,21 +58,24 @@ class CopernicusClient:
         self,
         cache_dir: Union[str, Path] = "data/cache/copernicus",
         load_dotenv_file: bool = True,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
     ) -> None:
         """Initialize the Copernicus client with authentication and caching setup.
+
+        The Copernicus Data Space Ecosystem uses username/password authentication for
+        the OData catalog and download APIs.
 
         Args:
             cache_dir: Directory where downloaded files and metadata will be cached.
                       Defaults to "data/cache/copernicus" relative to current directory.
             load_dotenv_file: Whether to automatically load credentials from .env file.
                              Set to False if you're providing credentials directly.
-            client_id: OAuth client ID. If None, will try to load from COPERNICUS_CLIENT_ID env var.
-            client_secret: OAuth client secret. If None, will try to load from COPERNICUS_CLIENT_SECRET env var.
+            username: Copernicus account username/email. If None, loads from COPERNICUS_USERNAME env var.
+            password: Copernicus account password. If None, loads from COPERNICUS_PASSWORD env var.
 
         Raises:
-            ValueError: If credentials cannot be found in environment variables or parameters.
+            ValueError: If username/password credentials cannot be found.
         """
         # Convert cache directory to Path object and ensure it exists
         self.cache_dir: Path = Path(cache_dir)
@@ -85,24 +88,24 @@ class CopernicusClient:
 
         # Get credentials from parameters or environment variables
         # Parameters take precedence over environment variables
-        client_id_from_env: Optional[str] = client_id or os.getenv("COPERNICUS_CLIENT_ID")
-        client_secret_from_env: Optional[str] = client_secret or os.getenv(
-            "COPERNICUS_CLIENT_SECRET"
-        )
+        username_from_env: Optional[str] = username or os.getenv("COPERNICUS_USERNAME")
+        password_from_env: Optional[str] = password or os.getenv("COPERNICUS_PASSWORD")
 
-        # Validate that we have the required credentials
-        if not client_id_from_env or not client_secret_from_env:
+        # Validate that we have the required username/password credentials
+        if not username_from_env or not password_from_env:
             raise ValueError(
-                "Copernicus credentials not found. Set COPERNICUS_CLIENT_ID and "
-                "COPERNICUS_CLIENT_SECRET environment variables or pass them directly."
+                "Copernicus credentials not found. Set COPERNICUS_USERNAME and "
+                "COPERNICUS_PASSWORD environment variables or pass them directly. "
+                "Get an account at: https://dataspace.copernicus.eu/"
             )
 
-        self.client_id: str = client_id_from_env
-        self.client_secret: str = client_secret_from_env
+        self.username: str = username_from_env
+        self.password: str = password_from_env
 
         # OAuth token management - these will be set when we first authenticate
         self._access_token: Optional[str] = None  # The actual Bearer token
         self._token_expires_at: float = 0  # Unix timestamp when token expires
+        self._refresh_token: Optional[str] = None  # Refresh token for extending session
 
         # Create a persistent HTTP session for connection pooling and cookie management
         self.session: requests.Session = requests.Session()
@@ -114,8 +117,8 @@ class CopernicusClient:
         1. We don't have a token yet, OR
         2. The current token is about to expire (within 5 minutes)
 
-        The Copernicus API uses OAuth2 "client credentials" flow, which means
-        we exchange our client_id and client_secret for a temporary access token.
+        The Copernicus OData/Download API uses OAuth2 "password" grant flow,
+        which means we exchange username and password for a temporary access token.
 
         Returns:
             A valid Bearer token string that can be used in API requests.
@@ -127,30 +130,122 @@ class CopernicusClient:
         if self._access_token and time.time() < self._token_expires_at:
             return self._access_token
 
-        # Request a new token using OAuth2 client credentials flow
-        # This is the standard way to authenticate machine-to-machine API access
+        # Try to use refresh token first if we have one
+        if self._refresh_token:
+            try:
+                return self._refresh_access_token()
+            except Exception as e:
+                print(f"⚠️  Refresh token failed: {e}, requesting new token...")
+                self._refresh_token = None  # Clear invalid refresh token
+
+        # Request a new token using OAuth2 password grant flow
+        # This is the correct method for OData catalog and download APIs
         data = {
-            "grant_type": "client_credentials",  # OAuth2 flow type
-            "client_id": self.client_id,  # Your registered client ID
-            "client_secret": self.client_secret,  # Your registered client secret
+            "grant_type": "password",
+            "username": self.username,
+            "password": self.password,
+            "client_id": "cdse-public",  # Public client ID for Copernicus Data Space
         }
 
-        # Make the token request
-        response = self.session.post(self.TOKEN_URL, data=data)
-        response.raise_for_status()  # Raise exception if request failed
+        try:
+            # Make the token request
+            response = self.session.post(self.TOKEN_URL, data=data, timeout=30)
 
-        # Parse the response to get token information
-        token_data = response.json()
-        self._access_token = token_data["access_token"]  # The actual token string
+            # Debug: Show what we're requesting
+            print("🔑 Requesting token with grant_type=password")
 
-        # Calculate when this token expires and set expiry with 5 minute buffer
-        # This prevents us from using a token that might expire during a request
-        expires_in = token_data.get("expires_in", 3600)  # Default to 1 hour if not specified
-        self._token_expires_at = time.time() + expires_in - 300  # Subtract 5 minutes (300 seconds)
+            response.raise_for_status()  # Raise exception if request failed
 
-        # At this point we're guaranteed to have a valid token
-        assert self._access_token is not None
-        return self._access_token
+            # Parse the response to get token information
+            token_data = response.json()
+
+            # Debug: Show token details
+            if "access_token" in token_data:
+                self._access_token = token_data["access_token"]  # The actual token string
+                self._refresh_token = token_data.get(
+                    "refresh_token", None
+                )  # Save refresh token (optional)
+
+                # Validate we got a non-empty token
+                if not self._access_token:
+                    raise ValueError("Received empty access token from API")
+
+                # Calculate when this token expires and set expiry with 5 minute buffer
+                expires_in = token_data.get("expires_in", 600)  # Default to 10 minutes
+                self._token_expires_at = (
+                    time.time() + expires_in - 300
+                )  # Subtract 5 minutes (300 seconds)
+
+                # Check token scope/audience
+                token_scope = token_data.get("scope", "not specified")
+                token_type = token_data.get("token_type", "Bearer")
+
+                print("✓ Got new access token")
+                print(f"  - Type: {token_type}")
+                print(f"  - Expires in: {expires_in}s (~{expires_in//60} minutes)")
+                print(f"  - Scope: {token_scope}")
+                print(f"  - Has refresh token: {self._refresh_token is not None}")
+
+                return self._access_token
+            else:
+                print("❌ Token response missing 'access_token' field")
+                print(f"   Response: {token_data}")
+                raise ValueError("Invalid token response")
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to get access token: {e}")
+            if hasattr(e, "response") and e.response is not None:
+                print(f"   Response status: {e.response.status_code}")
+                print(f"   Response body: {e.response.text[:200]}")
+            raise
+
+    def _refresh_access_token(self) -> str:
+        """Refresh the access token using the refresh token.
+
+        This extends the session without requiring username/password again.
+        Refresh tokens are valid for 60 minutes.
+
+        Returns:
+            A valid Bearer token string.
+
+        Raises:
+            requests.HTTPError: If the refresh request fails.
+        """
+        if not self._refresh_token:
+            raise ValueError("No refresh token available")
+
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self._refresh_token,
+            "client_id": "cdse-public",
+        }
+
+        try:
+            response = self.session.post(self.TOKEN_URL, data=data, timeout=30)
+            response.raise_for_status()
+
+            token_data = response.json()
+
+            if "access_token" in token_data:
+                self._access_token = token_data["access_token"]
+                self._refresh_token = token_data.get("refresh_token", self._refresh_token)
+
+                # Validate we got a non-empty token
+                if not self._access_token:
+                    raise ValueError("Received empty access token from refresh")
+
+                expires_in = token_data.get("expires_in", 600)
+                self._token_expires_at = time.time() + expires_in - 300
+
+                print(f"🔄 Refreshed access token (expires in {expires_in}s)")
+
+                return self._access_token
+            else:
+                raise ValueError("Invalid refresh token response")
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to refresh token: {e}")
+            raise
 
     def _make_request(
         self, url: str, params: Optional[Dict[str, Any]] = None, **kwargs: Any
@@ -496,6 +591,7 @@ class CopernicusClient:
         - Automatic retry with exponential backoff on failures
         - Resume partial downloads using HTTP Range requests
         - Progress bar for user feedback
+        - Unlimited token refreshes (token expiration doesn't count as a retry)
 
         IMPORTANT: For downloads longer than token lifetime (~10 min), the download
         will fail and automatically retry with a fresh token, resuming from where
@@ -505,7 +601,8 @@ class CopernicusClient:
             url: Download URL (typically ends with /$value)
             output_path: Where to save the downloaded file
             total_size: Expected file size in bytes
-            max_retries: Maximum number of retry attempts (default: 3)
+            max_retries: Maximum number of retry attempts for actual failures (default: 3)
+                        Note: Token refreshes don't count toward this limit
             chunk_size: Download chunk size in bytes (default: 8KB)
 
         Returns:
@@ -526,6 +623,7 @@ class CopernicusClient:
         # Track download progress
         bytes_downloaded = 0
         retry_count = 0
+        token_refresh_count = 0  # Track token refreshes separately
 
         # Create parent directory if needed
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -551,8 +649,28 @@ class CopernicusClient:
                 if bytes_downloaded > 0:
                     headers["Range"] = f"bytes={bytes_downloaded}-"
 
+                # Debug: Log the request details
+                if token_refresh_count == 0:
+                    print("📡 Making download request...")
+                    print(f"   URL: {url}")
+                    print(f"   Token (first 20 chars): {token[:20]}...")
+
                 # Start download with streaming
                 response = self.session.get(url, headers=headers, stream=True, timeout=300)
+
+                # Debug: Log response status
+                if response.status_code != 200 and response.status_code != 206:
+                    print(f"⚠️  Response status: {response.status_code}")
+
+                    # Check for rate limiting headers
+                    session_limit = response.headers.get("x-cf-sessionlimit-limit")
+                    session_remaining = response.headers.get("x-cf-sessionlimit-remaining")
+                    if session_limit or session_remaining:
+                        print(f"   Session limit: {session_remaining}/{session_limit}")
+
+                    print(f"   Response headers: {dict(response.headers)}")
+                    if response.text:
+                        print(f"   Response body (first 200 chars): {response.text[:200]}")
 
                 # Handle resume responses
                 if response.status_code == 206:  # Partial Content (resume)
@@ -564,10 +682,23 @@ class CopernicusClient:
                         if output_path.exists():
                             output_path.unlink()
                 elif response.status_code == 401:  # Token expired
-                    print("🔄 Token expired, refreshing and retrying...")
+                    token_refresh_count += 1
+
+                    # Check if we're stuck in a loop (no progress after multiple refreshes)
+                    if token_refresh_count > 10 and bytes_downloaded == 0:
+                        print(
+                            "❌ Token keeps expiring without making progress. "
+                            "This might indicate invalid credentials or API issues."
+                        )
+                        return False
+
+                    print(
+                        f"🔄 Token expired, refreshing and retrying... "
+                        f"(refresh #{token_refresh_count})"
+                    )
                     self._access_token = None  # Force token refresh
-                    retry_count += 1
-                    continue
+                    time.sleep(2)  # Longer pause to avoid rate limiting
+                    continue  # Don't increment retry_count for token expiration
                 else:
                     response.raise_for_status()
 

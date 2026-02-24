@@ -8,7 +8,7 @@ Usage:
     uv run python scripts/download_test_data.py
 
 Requirements:
-    - .env file with COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET
+    - .env file with COPERNICUS_USERNAME and COPERNICUS_PASSWORD
     - Internet connection
     - ~1-2 GB free disk space
 """
@@ -33,14 +33,14 @@ def main():
     test_data_dir.mkdir(parents=True, exist_ok=True)
 
     # Check credentials
-    client_id = os.getenv("COPERNICUS_CLIENT_ID")
-    client_secret = os.getenv("COPERNICUS_CLIENT_SECRET")
+    username = os.getenv("COPERNICUS_USERNAME")
+    password = os.getenv("COPERNICUS_PASSWORD")
 
-    if not client_id or not client_secret:
+    if not username or not password:
         print("ERROR: Missing credentials in .env file")
-        print("Please set COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET")
+        print("Please set COPERNICUS_USERNAME and COPERNICUS_PASSWORD")
         print()
-        print("Get free credentials at: https://dataspace.copernicus.eu/")
+        print("Get free account at: https://dataspace.copernicus.eu/")
         return 1
 
     print("=" * 60)
@@ -50,7 +50,7 @@ def main():
     print()
 
     # Initialize client
-    client = CopernicusClient(client_id=client_id, client_secret=client_secret)
+    client = CopernicusClient(username=username, password=password)
 
     # Test location: Agricultural area in Netherlands
     # Good S1/S2 coverage, flat terrain, agricultural land

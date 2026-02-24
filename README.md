@@ -73,17 +73,27 @@ uv run marimo run copernicus_marimo.py
 ```
 
 **Features:**
-- Configure Copernicus credentials (free OAuth2 API access)
+- Configure Copernicus credentials (free account required)
 - Search and download Sentinel-1 (SAR) and Sentinel-2 (optical) data
 - Interactive parameter selection (location, dates, satellite type)
+- **Time slider**: Browse through multiple satellite images chronologically to compare dates and visualize temporal changes
 - Visualize downloaded imagery with target area overlay
+- Optional crop to exact bounding box for focused analysis
 - Automatic caching to avoid re-downloads
 
 **Get free Copernicus credentials:**
 1. Visit https://dataspace.copernicus.eu/
-2. Register (no credit card required)
-3. Go to your account settings at: https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings
-4. Copy your Client ID and Client Secret
+2. Register for a free account (no credit card required)
+3. Use your username/email and password in the GUI or .env file
+
+**Authentication:**
+The Copernicus Data Space Ecosystem uses username/password authentication for downloading satellite data via the OData catalog API. Simply provide your account credentials:
+
+```bash
+# In your .env file:
+COPERNICUS_USERNAME=your_email@example.com
+COPERNICUS_PASSWORD=your_password
+```
 
 The GUI will guide you through credential setup and data download.
 

@@ -3,7 +3,7 @@ name = "galileo"
 version = "0.1.0"
 description = "Learning Global and Local Features in Pretrained Remote Sensing Models"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10,<3.12"
 license = { text = "MIT" }
 authors = [
     { name = "Gabriel Tseng", email = "gabriel.tseng@mail.mcgill.ca" },
@@ -17,7 +17,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 

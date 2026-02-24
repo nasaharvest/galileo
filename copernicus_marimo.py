@@ -37,18 +37,16 @@ def _(mo):
     # Copernicus Data Space Ecosystem Explorer
 
     This interactive GUI allows you to:
-    1. **Configure credentials** - Save your Copernicus API credentials securely
+    1. **Configure credentials** - Save your Copernicus account credentials securely
     2. **Search for data** - Find Sentinel-1 (SAR) or Sentinel-2 (optical) imagery
     3. **Download & visualize** - Automatically download and display satellite images
 
     ## Getting Started
 
-    **Get free Copernicus credentials:**
+    **Get free Copernicus account:**
     1. Visit: https://dataspace.copernicus.eu/
     2. Click "Register" (no credit card required)
-    3. After registration, go to your account settings at:
-       **https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings**
-    4. Copy your Client ID and Client Secret below
+    3. Use your account username/email and password below
 
     **About the satellites:**
     - **Sentinel-2 (S2)**: Optical imagery (like a camera), best for seeing colors, vegetation, water
@@ -63,32 +61,32 @@ def _(Path):
     """Check if Copernicus credentials are already configured in .env file.
 
     This cell reads the .env file (if it exists) and checks for valid
-    COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET entries.
+    COPERNICUS_USERNAME and COPERNICUS_PASSWORD entries.
     """
     env_path = Path(".env")
     env_exists = env_path.exists()
 
     # Initialize credential flags
-    has_client_id = False
-    has_client_secret = False
+    has_username = False
+    has_password = False
 
     # If .env exists, check if it has valid credentials
     if env_exists:
         with open(env_path, "r") as _f:
             content = _f.read()
-            # Check for CLIENT_ID (must have non-empty value)
-            has_client_id = (
-                "COPERNICUS_CLIENT_ID=" in content
-                and len(content.split("COPERNICUS_CLIENT_ID=")[1].split("\n")[0].strip()) > 0
+            # Check for USERNAME (must have non-empty value)
+            has_username = (
+                "COPERNICUS_USERNAME=" in content
+                and len(content.split("COPERNICUS_USERNAME=")[1].split("\n")[0].strip()) > 0
             )
-            # Check for CLIENT_SECRET (must have non-empty value)
-            has_client_secret = (
-                "COPERNICUS_CLIENT_SECRET=" in content
-                and len(content.split("COPERNICUS_CLIENT_SECRET=")[1].split("\n")[0].strip()) > 0
+            # Check for PASSWORD (must have non-empty value)
+            has_password = (
+                "COPERNICUS_PASSWORD=" in content
+                and len(content.split("COPERNICUS_PASSWORD=")[1].split("\n")[0].strip()) > 0
             )
 
-    # Credentials are configured only if both are present and non-empty
-    credentials_configured = has_client_id and has_client_secret
+    # Credentials are configured only if both username and password are present
+    credentials_configured = has_username and has_password
 
     return credentials_configured, env_path
 
@@ -117,49 +115,49 @@ def _(credentials_configured, mo):
             """
             ## ⚠️ Credentials Required
 
-            Please enter your Copernicus API credentials below.
+            Please enter your Copernicus account credentials below.
             These will be saved securely in a `.env` file.
 
-            **Don't have credentials yet?**
+            **Don't have an account yet?**
             1. Register for free at: https://dataspace.copernicus.eu/
-            2. Get your credentials at: https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings
+            2. Use your account username/email and password below
             """
         )
 
     # Create input widgets (password type hides the values for security)
-    client_id_input = mo.ui.text(
-        label="Client ID",
-        kind="password",
-        placeholder="Enter your Client ID from Copernicus",
+    username_input = mo.ui.text(
+        label="Username/Email",
+        kind="text",
+        placeholder="Enter your Copernicus username or email",
     )
-    client_secret_input = mo.ui.text(
-        label="Client Secret",
+    password_input = mo.ui.text(
+        label="Password",
         kind="password",
-        placeholder="Enter your Client Secret from Copernicus",
+        placeholder="Enter your Copernicus password",
     )
     save_button = mo.ui.run_button(label="💾 Save Credentials")
 
     # Display the form vertically stacked
-    mo.vstack([status_msg, client_id_input, client_secret_input, save_button])
-    return client_id_input, client_secret_input, save_button
+    mo.vstack([status_msg, username_input, password_input, save_button])
+    return password_input, save_button, username_input
 
 
 @app.cell
 def _(
-    client_id_input,
-    client_secret_input,
     env_path,
     mo,
     os,
+    password_input,
     save_button,
     traceback,
+    username_input,
 ):
     """Save credentials to .env file when Save button is clicked.
 
     This cell:
     1. Validates that both fields are filled
     2. Preserves any existing .env variables (doesn't overwrite other settings)
-    3. Writes COPERNICUS_CLIENT_ID and COPERNICUS_CLIENT_SECRET
+    3. Writes COPERNICUS_USERNAME and COPERNICUS_PASSWORD
     4. Sets credentials in current environment for immediate use
     """
     save_result = ""
@@ -167,15 +165,15 @@ def _(
     # Only process if save button was clicked
     if save_button.value:
         # Get values from input fields
-        client_id = client_id_input.value
-        client_secret = client_secret_input.value
+        username = username_input.value
+        password = password_input.value
 
         # Validate that both fields have values
-        if not client_id or not client_secret:
+        if not username or not password:
             save_result = """
             ❌ **Error: Both fields are required**
 
-            Please enter both your Client ID and Client Secret.
+            Please enter both your username/email and password.
             """
         else:
             try:
@@ -190,8 +188,8 @@ def _(
                             [
                                 line
                                 for line in lines
-                                if not line.startswith("COPERNICUS_CLIENT_ID=")
-                                and not line.startswith("COPERNICUS_CLIENT_SECRET=")
+                                if not line.startswith("COPERNICUS_USERNAME=")
+                                and not line.startswith("COPERNICUS_PASSWORD=")
                             ]
                         )
 
@@ -201,13 +199,13 @@ def _(
                     # Ensure newline before adding credentials
                     if existing_content and not existing_content.endswith("\n"):
                         _f.write("\n")
-                    _f.write(f"COPERNICUS_CLIENT_ID={client_id}\n")
-                    _f.write(f"COPERNICUS_CLIENT_SECRET={client_secret}\n")
+                    _f.write(f"COPERNICUS_USERNAME={username}\n")
+                    _f.write(f"COPERNICUS_PASSWORD={password}\n")
 
                 # Also set in current environment for immediate use
                 # (so you don't need to restart the app)
-                os.environ["COPERNICUS_CLIENT_ID"] = client_id
-                os.environ["COPERNICUS_CLIENT_SECRET"] = client_secret
+                os.environ["COPERNICUS_USERNAME"] = username
+                os.environ["COPERNICUS_PASSWORD"] = password
 
                 save_result = """
                 ✅ **Credentials saved successfully!**
@@ -254,6 +252,7 @@ def _(datetime, mo, timedelta):
     - Date range: Last 30 days
     - Satellite: Sentinel-2 (optical)
     - Max products: 2 (to keep download size manageable)
+    - Crop to bbox: False (show full context by default)
     """
     # Calculate default date range (last 30 days)
     default_end_date = datetime.now().strftime("%Y-%m-%d")
@@ -306,16 +305,25 @@ def _(datetime, mo, timedelta):
     # Max products to download (limited to prevent excessive downloads)
     max_products = mo.ui.number(
         start=1,
-        stop=10,
+        stop=50,
         step=1,
         value=2,
-        label="Max Products (1-10)",
+        label="Max Products",
+    )
+
+    # Crop to bbox option
+    # When enabled: Only shows target area (faster, less memory)
+    # When disabled: Shows full tile with context (slower, more memory)
+    crop_to_bbox = mo.ui.checkbox(
+        value=False,
+        label="Crop to target area only (faster, less memory)",
     )
 
     # Search button triggers the search and download
     search_button = mo.ui.run_button(label="🔍 Search & Download")
 
     return (
+        crop_to_bbox,
         end_date,
         max_lat,
         max_lon,
@@ -330,6 +338,7 @@ def _(datetime, mo, timedelta):
 
 @app.cell
 def _(
+    crop_to_bbox,
     end_date,
     max_lat,
     max_lon,
@@ -356,9 +365,34 @@ def _(
                 **Satellite & Time Range**: Choose satellite type and date range.
                 - **S2 (Sentinel-2)**: Optical imagery, 10m resolution, affected by clouds
                 - **S1 (Sentinel-1)**: Radar imagery, 10m resolution, works through clouds
+
+                **Max Products**: Number of images to download (1-50). Start with 2-5 for testing.
                 """
             ),
             mo.hstack([satellite_type, start_date, end_date, max_products]),
+            mo.md(
+                """
+                **Visualization Options**:
+                """
+            ),
+            crop_to_bbox,
+            mo.callout(
+                mo.md(
+                    """
+                    **Tip**: Unchecked (default) shows full satellite tile with context around your target area.
+                    Check the box if you only want to see the target area (uses less memory, good for many images).
+                    """
+                ),
+                kind="info",
+            ),
+            mo.callout(
+                mo.md(
+                    """
+                    **Note**: After changing any parameters above, click "Search & Download" again to apply the changes.
+                    """
+                ),
+                kind="warn",
+            ),
             search_button,
         ]
     )
@@ -439,51 +473,126 @@ def _(
 
                     """
 
-                    # Call appropriate fetch method based on satellite type
-                    if satellite_type.value == "S2":
-                        _spinner.update(title="Searching for Sentinel-2 products...")
-                        # Sentinel-2 parameters:
-                        # - resolution: 10m (highest resolution for RGB bands)
-                        # - max_cloud_cover: 30% (filter out very cloudy images)
-                        # - product_type: S2MSI2A (Level-2A = atmospherically corrected)
-                        downloaded_files = client.fetch_s2(
+                    # Capture stdout to get the "Found X products" message
+                    import io
+                    import sys
+
+                    _stdout_capture = io.StringIO()
+                    _old_stdout = sys.stdout
+                    sys.stdout = _stdout_capture
+
+                    try:
+                        # Call appropriate fetch method based on satellite type
+                        if satellite_type.value == "S2":
+                            _spinner.update(title="Searching for Sentinel-2 products...")
+                            # Sentinel-2 parameters:
+                            # - resolution: 10m (highest resolution for RGB bands)
+                            # - max_cloud_cover: 30% (filter out very cloudy images)
+                            # - product_type: S2MSI2A (Level-2A = atmospherically corrected)
+                            downloaded_files = client.fetch_s2(
+                                bbox=_bbox,
+                                start_date=str(start_date.value),
+                                end_date=str(end_date.value),
+                                resolution=10,
+                                max_cloud_cover=30,
+                                product_type="S2MSI2A",
+                                download_data=True,
+                                interactive=False,
+                                max_products=max_products.value,
+                            )
+                        else:
+                            _spinner.update(title="Searching for Sentinel-1 products...")
+                            # Sentinel-1 parameters:
+                            # - product_type: GRD (Ground Range Detected = processed SAR)
+                            # - polarization: VV,VH (dual-pol for better feature detection)
+                            # - orbit_direction: ASCENDING (consistent viewing geometry)
+                            downloaded_files = client.fetch_s1(
+                                bbox=_bbox,
+                                start_date=str(start_date.value),
+                                end_date=str(end_date.value),
+                                product_type="GRD",
+                                polarization="VV,VH",
+                                orbit_direction="ASCENDING",
+                                download_data=True,
+                                max_products=max_products.value,
+                            )
+                    finally:
+                        # Restore stdout
+                        sys.stdout = _old_stdout
+                        _captured_output = _stdout_capture.getvalue()
+
+                    # Try to get total available from cache file
+                    # The cache stores all products found, not just the ones downloaded
+                    _total_available = None
+                    try:
+                        import json
+
+                        from src.data.copernicus.utils import build_cache_key
+
+                        _cache_key = build_cache_key(
+                            "s2" if satellite_type.value == "S2" else "s1",
                             bbox=_bbox,
                             start_date=str(start_date.value),
                             end_date=str(end_date.value),
-                            resolution=10,
-                            max_cloud_cover=30,
-                            product_type="S2MSI2A",
-                            download_data=True,
-                            interactive=False,
-                            max_products=max_products.value,
-                        )
-                    else:
-                        _spinner.update(title="Searching for Sentinel-1 products...")
-                        # Sentinel-1 parameters:
-                        # - product_type: GRD (Ground Range Detected = processed SAR)
-                        # - polarization: VV,VH (dual-pol for better feature detection)
-                        # - orbit_direction: ASCENDING (consistent viewing geometry)
-                        downloaded_files = client.fetch_s1(
-                            bbox=_bbox,
-                            start_date=str(start_date.value),
-                            end_date=str(end_date.value),
-                            product_type="GRD",
-                            polarization="VV,VH",
-                            orbit_direction="ASCENDING",
+                            resolution=10 if satellite_type.value == "S2" else None,
+                            max_cloud_cover=30 if satellite_type.value == "S2" else None,
+                            product_type="S2MSI2A" if satellite_type.value == "S2" else "GRD",
                             download_data=True,
                             max_products=max_products.value,
+                            polarization="VV,VH" if satellite_type.value == "S1" else None,
+                            orbit_direction="ASCENDING" if satellite_type.value == "S1" else None,
                         )
+                        _cache_file = client.cache_dir / f"{_cache_key}.json"
+
+                        if _cache_file.exists():
+                            with open(_cache_file) as _f:
+                                _cache_data = json.load(_f)
+                                _all_products = _cache_data.get("products", [])
+                                _total_available = len(_all_products)
+                    except Exception as _e:
+                        # If cache reading fails, try parsing stdout
+                        for _line in _captured_output.split("\n"):
+                            if "Found" in _line and "products" in _line:
+                                import re as _re
+
+                                _match = _re.search(r"Found (\d+)", _line)
+                                if _match:
+                                    _total_available = int(_match.group(1))
+                                    break
 
                     # Check if we got any files
                     if downloaded_files and len(downloaded_files) > 0:
                         _spinner.update(title="Download complete!")
-                        download_result += f"""
-                        ✅ **Downloaded {len(downloaded_files)} product(s)!**
 
-                        Files are cached in `data/cache/copernicus/` for future use.
+                        # Show total available vs downloaded
+                        if _total_available is not None and _total_available > len(
+                            downloaded_files
+                        ):
+                            download_result += f"""
+                            ✅ **Downloaded {len(downloaded_files)} of {_total_available} available product(s)!**
 
-                        **Downloaded files:**
-                        """
+                            *Note: {_total_available - len(downloaded_files)} additional product(s) available. Increase "Max Products" to download more.*
+
+                            Files are cached in `data/cache/copernicus/` for future use.
+
+                            **Downloaded files:**
+                            """
+                        elif _total_available is not None:
+                            download_result += f"""
+                            ✅ **Downloaded all {len(downloaded_files)} available product(s)!**
+
+                            Files are cached in `data/cache/copernicus/` for future use.
+
+                            **Downloaded files:**
+                            """
+                        else:
+                            download_result += f"""
+                            ✅ **Downloaded {len(downloaded_files)} product(s)!**
+
+                            Files are cached in `data/cache/copernicus/` for future use.
+
+                            **Downloaded files:**
+                            """
                         for _f in downloaded_files:
                             # Show just the filename, not full path
                             download_result += f"\n- `{_f.name}`"
@@ -525,6 +634,8 @@ def _(
 
 @app.cell
 def _(
+    crop_to_bbox,
+    datetime,
     downloaded_files,
     max_lat,
     max_lon,
@@ -532,85 +643,363 @@ def _(
     min_lon,
     mo,
     satellite_type,
-    traceback,
 ):
-    """Visualize downloaded satellite imagery.
+    """Create time slider and pre-process all images for fast rendering.
 
     This cell:
-    1. Checks if there are downloaded files to visualize
-    2. Imports visualization functions
-    3. Creates matplotlib subplots (max 2 images side-by-side)
-    4. Calls appropriate visualization function (S2=RGB, S1=SAR)
-    5. Displays the resulting figure
+    1. Extracts dates from filenames and creates metadata
+    2. Pre-processes ALL images into memory (cached)
+    3. Creates slider widget for navigation
+
+    Pre-processing happens once, making slider interactions instant.
+    The crop_to_bbox option controls whether to show full context or just target area.
+    """
+    time_slider = None
+    file_metadata = []
+    cached_images = []
+
+    if downloaded_files and len(downloaded_files) > 0:
+        # Show progress while pre-processing
+        with mo.status.spinner(title="Pre-processing images for fast slider...") as _spinner:
+            import re
+
+            # Get bbox for optional cropping
+            _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
+            _use_bbox = crop_to_bbox.value  # User's choice
+
+            # Extract dates and pre-process images
+            for _idx, _file_path in enumerate(downloaded_files):
+                _spinner.update(title=f"Processing image {_idx + 1}/{len(downloaded_files)}...")
+
+                _filename = _file_path.name
+
+                # Extract date from filename
+                _date_match = re.search(r"(\d{8}T\d{6})", _filename)
+                if _date_match:
+                    _date_str = _date_match.group(1)
+                    _date_obj = datetime.strptime(_date_str, "%Y%m%dT%H%M%S")
+                    _date_display = _date_obj.strftime("%Y-%m-%d %H:%M")
+                else:
+                    _date_obj = None
+                    _date_display = "Unknown date"
+
+                # Pre-process the image based on satellite type
+                _processed_data = None
+                try:
+                    if satellite_type.value == "S2":
+                        # Sentinel-2: Extract RGB composite
+                        from src.data.copernicus.image_processing import extract_rgb_composite
+
+                        _processed_data = extract_rgb_composite(
+                            _file_path, bbox=_bbox if _use_bbox else None
+                        )
+                    else:
+                        # Sentinel-1: Extract SAR data (VV polarization)
+                        from src.data.copernicus.image_processing import extract_sar_composite
+
+                        _processed_data = extract_sar_composite(
+                            _file_path,
+                            polarizations=["VV"],
+                            bbox=_bbox if _use_bbox else None,
+                        )
+
+                    if (
+                        _processed_data is not None
+                        and _processed_data.get("bounds_wgs84") is not None
+                    ):
+                        # Store metadata and cached image data
+                        file_metadata.append(
+                            {
+                                "path": _file_path,
+                                "date": _date_obj,
+                                "date_str": _date_display,
+                                "filename": _filename,
+                            }
+                        )
+                        cached_images.append(_processed_data)
+                    else:
+                        print(f"Warning: Failed to process {_filename} (missing bounds or data)")
+
+                except Exception as _e:
+                    print(f"Error processing {_filename}: {_e}")
+                    import traceback as _tb
+
+                    _tb.print_exc()
+                    continue
+
+            _spinner.update(title="Processing complete!")
+
+        # Sort by date (oldest first) - sort both lists together
+        if file_metadata:
+            _sorted_pairs = sorted(
+                zip(file_metadata, cached_images),
+                key=lambda x: x[0]["date"] if x[0]["date"] else datetime.min,
+            )
+            file_metadata, cached_images = (
+                [x[0] for x in _sorted_pairs],
+                [x[1] for x in _sorted_pairs],
+            )
+
+            # Create slider if we have multiple files
+            if len(file_metadata) > 1:
+                time_slider = mo.ui.slider(
+                    start=0,
+                    stop=len(file_metadata) - 1,
+                    step=1,
+                    value=0,
+                    label=f"Time Step (1 of {len(file_metadata)})",
+                    show_value=False,
+                )
+
+    return cached_images, file_metadata, time_slider
+
+
+@app.cell
+def _(file_metadata, mo, time_slider):
+    """Display time slider controls and current image info."""
+    slider_display = None
+
+    if time_slider is not None and len(file_metadata) > 1:
+        # Get current selection
+        _current_idx = time_slider.value
+        _current_meta = file_metadata[_current_idx]
+
+        # Display slider with metadata
+        slider_display = mo.vstack(
+            [
+                mo.md(
+                    f"""
+                    ---
+                    ## 📅 Time Series Visualization
+
+                    Navigate through {len(file_metadata)} images using the slider below.
+                    """
+                ),
+                mo.Html(
+                    f"""
+                    <div style="width: 100%; padding: 20px 0;">
+                        {time_slider}
+                    </div>
+                    """
+                ),
+                mo.md(
+                    f"""
+                    **Image {_current_idx + 1} of {len(file_metadata)}**
+                    - **Date**: {_current_meta['date_str']}
+                    - **File**: `{_current_meta['filename']}`
+                    """
+                ),
+            ]
+        )
+    elif file_metadata and len(file_metadata) == 1:
+        # Single image - no slider needed
+        slider_display = mo.md(
+            f"""
+            ---
+            ## 📅 Satellite Image
+
+            **Date**: {file_metadata[0]['date_str']}
+            **File**: `{file_metadata[0]['filename']}`
+            """
+        )
+
+    slider_display
+    return
+
+
+@app.cell
+def _(
+    cached_images,
+    file_metadata,
+    max_lat,
+    max_lon,
+    min_lat,
+    min_lon,
+    mo,
+    satellite_type,
+    time_slider,
+    traceback,
+):
+    """Visualize the selected satellite image using cached data.
+
+    This cell displays pre-processed images from cache, making slider
+    interactions nearly instant (no disk I/O or processing needed).
 
     Visualization details:
     - S2: RGB composite (natural color) with target bbox overlay
     - S1: VV polarization (grayscale) with adaptive contrast
-    - Both: Cropped to target bbox for focused view
+    - Both: Already cropped to target bbox during pre-processing
     """
     viz_result = None
 
-    # Only visualize if we have downloaded files
-    if downloaded_files and len(downloaded_files) > 0:
+    # Only visualize if we have cached images
+    if cached_images and len(cached_images) > 0:
         try:
             # Import visualization libraries
             import matplotlib.pyplot as plt
+            import numpy as np
 
-            from src.data.copernicus import display_sar_image, display_satellite_image
-
-            # Get bbox for cropping and overlay
+            # Get bbox for overlay
             _viz_bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
 
-            # Limit to 2 images to keep visualization manageable
-            num_files = min(len(downloaded_files), 2)
+            # Determine which image to display
+            if time_slider is not None:
+                # Use slider value
+                _selected_idx = time_slider.value
+            else:
+                # No slider (single image)
+                _selected_idx = 0
 
-            # Create subplot grid (1 row, up to 2 columns)
-            fig, axes = plt.subplots(1, num_files, figsize=(12, 6))
-            if num_files == 1:
-                axes = [axes]  # Make it a list for consistent indexing
+            # Get the cached image data (already processed!)
+            _image_data = cached_images[_selected_idx]
+            _metadata = file_metadata[_selected_idx]
 
-            # Render each file
-            for idx, file_path in enumerate(downloaded_files[:num_files]):
+            # Create figure
+            fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+            # Display the cached image
+            if _image_data is not None and _image_data.get("bounds_wgs84") is not None:
+                _bounds = _image_data["bounds_wgs84"]
+                _extent = (
+                    _bounds[0],
+                    _bounds[2],
+                    _bounds[1],
+                    _bounds[3],
+                )  # (min_lon, max_lon, min_lat, max_lat)
+
+                # PERFORMANCE FIX: If image is not cropped, crop it now for visualization
+                # This prevents matplotlib from rendering millions of pixels that won't be visible
+                _display_data = None
+                _display_extent = _extent
+
+                # Calculate zoom area with padding
+                _padding = 0.02
+                _zoom_bbox = [
+                    _viz_bbox[0] - _padding,
+                    _viz_bbox[1] - _padding,
+                    _viz_bbox[2] + _padding,
+                    _viz_bbox[3] + _padding,
+                ]
+
+                # Check if we need to crop for visualization (image is larger than zoom area)
+                _needs_crop = (
+                    _bounds[2] - _bounds[0] > _zoom_bbox[2] - _zoom_bbox[0]
+                    or _bounds[3] - _bounds[1] > _zoom_bbox[3] - _zoom_bbox[1]
+                )
+
+                if _needs_crop:
+                    # Crop the image to the zoom area for faster rendering
+                    from src.data.copernicus.image_processing import crop_to_bbox as _crop_fn
+
+                    if satellite_type.value == "S2":
+                        _display_data = _crop_fn(_image_data["rgb_array"], _bounds, _zoom_bbox)
+                    else:
+                        _sar_data = _image_data["sar_array"]
+                        if _sar_data.ndim == 3:
+                            _sar_data = _sar_data[:, :, 0]  # Extract first polarization
+                        _display_data = _crop_fn(_sar_data, _bounds, _zoom_bbox)
+
+                    if _display_data is not None:
+                        # Update extent to match cropped area
+                        _display_extent = (
+                            _zoom_bbox[0],
+                            _zoom_bbox[2],
+                            _zoom_bbox[1],
+                            _zoom_bbox[3],
+                        )
+                    else:
+                        # Cropping failed, fall back to full image
+                        _needs_crop = False
+
+                # Display the image array (already normalized and ready)
                 if satellite_type.value == "S2":
-                    # Sentinel-2: Display RGB composite
-                    # This extracts B04 (Red), B03 (Green), B02 (Blue) bands
-                    # and creates a natural color image
-                    result_ax = display_satellite_image(file_path, _viz_bbox, ax=axes[idx])
-
-                    if result_ax is None:
-                        # Visualization failed (e.g., corrupt file, missing bands)
-                        axes[idx].text(
-                            0.5,
-                            0.5,
-                            "⚠️ Image extraction failed\n\nFile may be corrupt or incomplete",
-                            ha="center",
-                            va="center",
-                            transform=axes[idx].transAxes,
-                            fontsize=12,
-                        )
-                        axes[idx].set_title(f"Product {idx+1}: Error")
+                    # RGB image (H, W, 3)
+                    if _needs_crop and _display_data is not None:
+                        ax.imshow(_display_data, extent=_display_extent, aspect="auto")
+                    else:
+                        ax.imshow(_image_data["rgb_array"], extent=_extent, aspect="auto")
                 else:
-                    # Sentinel-1: Display SAR image (VV polarization)
-                    # VV = Vertical transmit, Vertical receive
-                    # Good for water detection, urban areas, soil moisture
-                    result_ax = display_sar_image(
-                        file_path, _viz_bbox, ax=axes[idx], polarization="VV"
-                    )
-
-                    if result_ax is None:
-                        # Visualization failed
-                        axes[idx].text(
-                            0.5,
-                            0.5,
-                            "⚠️ SAR extraction failed\n\nFile may be corrupt or incomplete",
-                            ha="center",
-                            va="center",
-                            transform=axes[idx].transAxes,
-                            fontsize=12,
+                    # SAR grayscale image (H, W, 1) - squeeze to (H, W)
+                    if _needs_crop and _display_data is not None:
+                        # Apply percentile clipping for better visualization
+                        _vmin, _vmax = np.percentile(_display_data, [2, 98])
+                        ax.imshow(
+                            _display_data,
+                            extent=_display_extent,
+                            aspect="auto",
+                            cmap="gray",
+                            vmin=_vmin,
+                            vmax=_vmax,
                         )
-                        axes[idx].set_title(f"Product {idx+1}: Error")
+                    else:
+                        _sar_data = _image_data["sar_array"]
+                        if _sar_data.ndim == 3:
+                            _sar_data = _sar_data[:, :, 0]  # Extract first polarization
 
-            # Adjust spacing between subplots
+                        # Apply percentile clipping for better visualization
+                        _vmin, _vmax = np.percentile(_sar_data, [2, 98])
+
+                        ax.imshow(
+                            _sar_data,
+                            extent=_extent,
+                            aspect="auto",
+                            cmap="gray",
+                            vmin=_vmin,
+                            vmax=_vmax,
+                        )
+
+                # Add target area overlay
+                _bbox_lons = [
+                    _viz_bbox[0],
+                    _viz_bbox[2],
+                    _viz_bbox[2],
+                    _viz_bbox[0],
+                    _viz_bbox[0],
+                ]
+                _bbox_lats = [
+                    _viz_bbox[1],
+                    _viz_bbox[1],
+                    _viz_bbox[3],
+                    _viz_bbox[3],
+                    _viz_bbox[1],
+                ]
+                ax.plot(
+                    _bbox_lons,
+                    _bbox_lats,
+                    "red",
+                    linewidth=3,
+                    alpha=0.8,
+                    label="Target Area",
+                )
+
+                # Zoom to target area with padding
+                _padding = 0.02
+                ax.set_xlim(_viz_bbox[0] - _padding, _viz_bbox[2] + _padding)
+                ax.set_ylim(_viz_bbox[1] - _padding, _viz_bbox[3] + _padding)
+
+                # Customize plot
+                ax.set_xlabel("Longitude (°E)", fontsize=12)
+                ax.set_ylabel("Latitude (°N)", fontsize=12)
+
+                _title = f"{satellite_type.value} Image - {_metadata['date_str']}\n{_metadata['filename'][:50]}..."
+                ax.set_title(_title, fontsize=11, fontweight="bold")
+
+                ax.grid(True, alpha=0.3, color="white")
+                ax.legend()
+            else:
+                # Visualization failed
+                ax.text(
+                    0.5,
+                    0.5,
+                    "⚠️ Image data unavailable\n\nProcessing may have failed",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                    fontsize=12,
+                )
+                ax.set_title("Error")
+
+            # Adjust layout
             plt.tight_layout()
 
             # Set result to figure for Marimo to display
@@ -623,14 +1012,13 @@ def _(
                 f"""
                 ## ❌ Visualization Error
 
-                Failed to visualize the downloaded imagery.
+                Failed to visualize the cached imagery.
 
                 **Error**: {_error_msg}
 
                 **Possible causes:**
-                - Corrupt or incomplete download
-                - Missing required bands in the product
-                - Insufficient memory for large images
+                - Cached data format issue
+                - Insufficient memory for images
 
                 Check the console for detailed error information.
                 """
@@ -640,7 +1028,6 @@ def _(
             print(traceback.format_exc())
 
     # Return the figure for Marimo to display
-    # (None if no files to visualize)
     viz_result
     return
 
