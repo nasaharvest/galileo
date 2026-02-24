@@ -755,62 +755,9 @@ def _(
 
 
 @app.cell
-def _(file_metadata, mo, time_slider):
-    """Display time slider controls and current image info."""
+def _(cached_images, file_metadata, mo, time_slider):
+    """Display time slider and adjustment sliders in a compact side-by-side layout."""
     slider_display = None
-
-    if time_slider is not None and len(file_metadata) > 1:
-        # Get current selection
-        _current_idx = time_slider.value
-        _current_meta = file_metadata[_current_idx]
-
-        # Display slider with metadata
-        slider_display = mo.vstack(
-            [
-                mo.md(
-                    f"""
-                    ---
-                    ## 📅 Time Series Visualization
-
-                    Navigate through {len(file_metadata)} images using the slider below.
-                    """
-                ),
-                mo.Html(
-                    f"""
-                    <div style="width: 100%; padding: 20px 0;">
-                        {time_slider}
-                    </div>
-                    """
-                ),
-                mo.md(
-                    f"""
-                    **Image {_current_idx + 1} of {len(file_metadata)}**
-                    - **Date**: {_current_meta['date_str']}
-                    - **File**: `{_current_meta['filename']}`
-                    """
-                ),
-            ]
-        )
-    elif file_metadata and len(file_metadata) == 1:
-        # Single image - no slider needed
-        slider_display = mo.md(
-            f"""
-            ---
-            ## 📅 Satellite Image
-
-            **Date**: {file_metadata[0]['date_str']}
-            **File**: `{file_metadata[0]['filename']}`
-            """
-        )
-
-    slider_display
-    return
-
-
-@app.cell
-def _(cached_images, mo):
-    """Create image adjustment sliders for contrast, brightness, and gamma correction."""
-    adjustment_sliders = None
     contrast_slider = None
     brightness_slider = None
     gamma_slider = None
@@ -844,28 +791,78 @@ def _(cached_images, mo):
             show_value=True,
         )
 
-        # Display adjustment controls
-        adjustment_sliders = mo.vstack(
-            [
-                mo.md(
-                    """
-                    ## 🎨 Image Adjustments
+        # Build the layout based on whether we have time slider
+        if time_slider is not None and len(file_metadata) > 1:
+            # Get current selection
+            _current_idx = time_slider.value
+            _current_meta = file_metadata[_current_idx]
 
-                    Fine-tune the image appearance using the controls below:
-                    - **Contrast**: Adjust the difference between light and dark areas
-                    - **Brightness**: Make the image lighter or darker
-                    - **Gamma**: Adjust midtone brightness (affects shadows/highlights differently)
-                    """
-                ),
-                contrast_slider,
-                brightness_slider,
-                gamma_slider,
-            ]
-        )
+            # Create two-column layout: time slider on left, adjustments on right
+            slider_display = mo.vstack(
+                [
+                    mo.md(
+                        """
+                        ---
+                        ## 📅 Time Series & Image Adjustments
+                        """
+                    ),
+                    mo.hstack(
+                        [
+                            # Left column: Time slider
+                            mo.vstack(
+                                [
+                                    mo.md(f"**Navigate through {len(file_metadata)} images**"),
+                                    time_slider,
+                                    mo.md(
+                                        f"""
+                                        **Image {_current_idx + 1} of {len(file_metadata)}**
+                                        Date: {_current_meta['date_str']}
+                                        File: `{_current_meta['filename'][:40]}...`
+                                        """
+                                    ),
+                                ],
+                                align="start",
+                            ),
+                            # Right column: Adjustment sliders
+                            mo.vstack(
+                                [
+                                    mo.md("**Fine-tune image appearance**"),
+                                    contrast_slider,
+                                    brightness_slider,
+                                    gamma_slider,
+                                ],
+                                align="start",
+                            ),
+                        ],
+                        justify="start",
+                    ),
+                ]
+            )
+        elif file_metadata and len(file_metadata) == 1:
+            # Single image - just show adjustments compactly
+            slider_display = mo.vstack(
+                [
+                    mo.md(
+                        f"""
+                        ---
+                        ## 📅 Satellite Image & Adjustments
 
-    adjustment_sliders
+                        **Date**: {file_metadata[0]['date_str']} | **File**: `{file_metadata[0]['filename'][:50]}...`
+                        """
+                    ),
+                    mo.hstack(
+                        [
+                            contrast_slider,
+                            brightness_slider,
+                            gamma_slider,
+                        ],
+                        justify="start",
+                    ),
+                ]
+            )
+
+    slider_display
     return (
-        adjustment_sliders,
         brightness_slider,
         contrast_slider,
         gamma_slider,
