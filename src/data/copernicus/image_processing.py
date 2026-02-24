@@ -9,6 +9,7 @@ Sentinel-2 optical imagery from downloaded Copernicus products, including:
 """
 
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -18,6 +19,71 @@ import rasterio
 from rasterio.warp import transform_bounds
 
 from .utils import find_granule_directory
+
+
+def _extract_s1_bounds_from_annotation(
+    safe_dir: Path,
+) -> Optional[Tuple[float, float, float, float]]:
+    """Extract geographic bounds from Sentinel-1 annotation XML files.
+
+    S1 GRD products often lack CRS metadata in the TIFF files. The geolocation
+    information is stored in annotation XML files as a grid of lat/lon points.
+
+    Args:
+        safe_dir: Path to the .SAFE directory
+
+    Returns:
+        Tuple of (min_lon, min_lat, max_lon, max_lat) in WGS84, or None if extraction fails
+    """
+    try:
+        annotation_dir = safe_dir / "annotation"
+        if not annotation_dir.exists():
+            print(f"No annotation directory found in {safe_dir.name}")
+            return None
+
+        # Find any annotation XML file (they all have the same geolocation grid)
+        xml_files = list(annotation_dir.glob("*.xml"))
+        if not xml_files:
+            print(f"No annotation XML files found in {safe_dir.name}")
+            return None
+
+        xml_file = xml_files[0]
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+
+        # Extract all latitude and longitude values from geolocation grid
+        lats = []
+        lons = []
+
+        for elem in root.iter():
+            if elem.tag.endswith("geolocationGridPoint"):
+                lat_elem = elem.find(".//{*}latitude")
+                lon_elem = elem.find(".//{*}longitude")
+                if lat_elem is not None and lon_elem is not None:
+                    try:
+                        lat_text = lat_elem.text
+                        lon_text = lon_elem.text
+                        if lat_text is not None and lon_text is not None:
+                            lats.append(float(lat_text))
+                            lons.append(float(lon_text))
+                    except (ValueError, TypeError):
+                        continue
+
+        if not lats or not lons:
+            print(f"No geolocation points found in {xml_file.name}")
+            return None
+
+        # Calculate bounding box from all points
+        bounds_wgs84 = (min(lons), min(lats), max(lons), max(lats))
+        print(f"Extracted bounds from annotation: {bounds_wgs84}")
+        return bounds_wgs84
+
+    except Exception as e:
+        print(f"Error extracting bounds from annotation: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
 
 
 def extract_rgb_composite(
@@ -623,10 +689,22 @@ def extract_sar_composite(
             sar_display = np.transpose(sar_array, (1, 2, 0))
 
             # Convert bounds to WGS84 for consistency with S2 functions
+            # IMPORTANT: S1 GRD products often lack CRS metadata in the TIFF files
+            # The geolocation is stored in annotation XML files instead
             if bounds is not None and crs is not None:
                 bounds_wgs84 = transform_bounds(
                     crs, "EPSG:4326", bounds.left, bounds.bottom, bounds.right, bounds.top
                 )
+            elif crs is None:
+                # Fallback: Extract bounds from annotation XML files
+                # This is common for S1 GRD products where TIFF files lack CRS
+                print("CRS missing in TIFF, extracting bounds from annotation XML...")
+                bounds_wgs84 = _extract_s1_bounds_from_annotation(safe_dir)
+                if bounds_wgs84 is None:
+                    print(f"Failed to extract bounds from annotation for {zip_file_path.name}")
+                    return None
+                # Set CRS to WGS84 since annotation coordinates are in lat/lon
+                crs = "EPSG:4326"
             else:
                 bounds_wgs84 = None
 
