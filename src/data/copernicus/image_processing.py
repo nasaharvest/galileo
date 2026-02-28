@@ -744,3 +744,250 @@ def extract_sar_composite(
 
         traceback.print_exc()
         return None
+
+
+def extract_all_s2_bands(
+    zip_file_path: Path,
+    bbox: Optional[List[float]] = None,
+    target_resolution: int = 10,
+) -> Optional[Dict]:
+    """Extract ALL Sentinel-2 bands for Galileo model compatibility.
+
+    This function extracts all 12 spectral bands from Sentinel-2 imagery,
+    resampling them to a common resolution (default 10m) for consistency.
+
+    Sentinel-2 Band Information:
+    - B01 (Coastal aerosol): 443nm, 60m native → resampled to 10m
+    - B02 (Blue): 490nm, 10m native
+    - B03 (Green): 560nm, 10m native
+    - B04 (Red): 665nm, 10m native
+    - B05 (Red Edge 1): 705nm, 20m native → resampled to 10m
+    - B06 (Red Edge 2): 740nm, 20m native → resampled to 10m
+    - B07 (Red Edge 3): 783nm, 20m native → resampled to 10m
+    - B08 (NIR): 842nm, 10m native
+    - B8A (Red Edge 4): 865nm, 20m native → resampled to 10m
+    - B09 (Water vapor): 945nm, 60m native → resampled to 10m
+    - B11 (SWIR 1): 1610nm, 20m native → resampled to 10m
+    - B12 (SWIR 2): 2190nm, 20m native → resampled to 10m
+
+    Args:
+        zip_file_path: Path to Sentinel-2 ZIP file
+        bbox: Optional bounding box [min_lon, min_lat, max_lon, max_lat] to crop to
+        target_resolution: Target resolution in meters (default: 10m)
+
+    Returns:
+        Dictionary containing:
+        - 'bands_array': Multi-band array (H, W, 12) with all S2 bands
+        - 'band_names': List of band names in order ['B01', 'B02', ..., 'B12']
+        - 'bounds_wgs84': Geographic bounds in WGS84
+        - 'bounds_utm': Original UTM bounds
+        - 'crs': Coordinate reference system
+        - 'metadata': Additional metadata
+
+        Returns None if extraction fails.
+    """
+
+    # All 12 S2 bands in order (matching Galileo expectations)
+    all_bands = [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B11",
+        "B12",
+    ]
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Extract only the band files we need
+            with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
+                all_files = zip_ref.namelist()
+
+                files_to_extract = []
+                band_file_mapping = {}
+
+                for band in all_bands:
+                    for file_path in all_files:
+                        filename = file_path.split("/")[-1]
+                        # Match patterns for different resolutions
+                        if (
+                            f"_{band}_10m.jp2" in filename
+                            or f"_{band}_20m.jp2" in filename
+                            or f"_{band}_60m.jp2" in filename
+                            or f"_{band}.jp2" in filename
+                        ) and band not in band_file_mapping:
+                            files_to_extract.append(file_path)
+                            band_file_mapping[band] = file_path
+                            break
+
+                # Extract only needed files
+                for file_path in files_to_extract:
+                    zip_ref.extract(file_path, temp_path)
+
+            # Find SAFE directory
+            safe_dirs = list(temp_path.glob("*.SAFE"))
+            if not safe_dirs:
+                print(f"No SAFE directory found in {zip_file_path.name}")
+                return None
+
+            safe_dir = safe_dirs[0]
+
+            # Find granule directory
+            granule_dir = find_granule_directory(safe_dir, zip_file_path.name)
+            if granule_dir is None:
+                return None
+
+            # Build band_files dict
+            band_files = {}
+            for band in all_bands:
+                if band in band_file_mapping:
+                    extracted_file = temp_path / band_file_mapping[band]
+                    if extracted_file.exists():
+                        band_files[band] = extracted_file
+
+            if len(band_files) < len(all_bands):
+                print(
+                    f"Warning: Only found {len(band_files)}/{len(all_bands)} bands in {zip_file_path.name}"
+                )
+                print(f"Missing bands: {set(all_bands) - set(band_files.keys())}")
+
+            # Read all bands and resample to target resolution
+            band_arrays = []
+            bounds = None
+            crs = None
+            reference_shape = None
+
+            # First pass: find reference shape from 10m bands
+            for band in ["B02", "B03", "B04", "B08"]:  # 10m native bands
+                if band in band_files:
+                    with rasterio.open(band_files[band]) as src:
+                        reference_shape = (src.height, src.width)
+                        bounds = src.bounds
+                        crs = src.crs
+                        break
+
+            if reference_shape is None:
+                print(f"Could not determine reference shape from {zip_file_path.name}")
+                return None
+
+            # Second pass: read and resample all bands
+            from rasterio.enums import Resampling
+
+            for band in all_bands:
+                if band in band_files:
+                    with rasterio.open(band_files[band]) as src:
+                        # Read band data
+                        if src.shape == reference_shape:
+                            # Already at target resolution
+                            band_data = src.read(1, out_dtype=np.float32)
+                        else:
+                            # Resample to target resolution
+                            band_data = src.read(
+                                1,
+                                out_shape=reference_shape,
+                                resampling=Resampling.bilinear,
+                                out_dtype=np.float32,
+                            )
+
+                        band_arrays.append(band_data)
+                else:
+                    # Band not found - fill with zeros
+                    print(f"Warning: Band {band} not found, filling with zeros")
+                    band_arrays.append(np.zeros(reference_shape, dtype=np.float32))
+
+            # Stack all bands: (12, H, W) → (H, W, 12)
+            bands_stacked = np.stack(band_arrays, axis=0)
+            bands_display = np.transpose(bands_stacked, (1, 2, 0))
+
+            # Convert bounds to WGS84
+            if bounds is not None:
+                bounds_wgs84 = transform_bounds(
+                    crs, "EPSG:4326", bounds.left, bounds.bottom, bounds.right, bounds.top
+                )
+            else:
+                bounds_wgs84 = None
+
+            # Apply bbox cropping if requested
+            if bbox is not None and bounds_wgs84 is not None:
+                print(f"Cropping to bbox: {bbox}")
+                cropped_result = crop_to_bbox(bands_display, bounds_wgs84, bbox)
+                if cropped_result is None:
+                    print("Cropping failed, returning None")
+                    return None
+                bands_display = cropped_result
+                bounds_wgs84 = tuple(bbox)
+
+            return {
+                "bands_array": bands_display,
+                "band_names": all_bands,
+                "bounds_wgs84": bounds_wgs84,
+                "bounds_utm": bounds,
+                "crs": str(crs),
+                "metadata": {
+                    "shape": bands_display.shape,
+                    "num_bands": len(all_bands),
+                    "resolution_m": target_resolution,
+                    "zip_file": zip_file_path.name,
+                    "safe_dir": safe_dir.name,
+                },
+            }
+
+    except Exception as e:
+        print(f"Error extracting all S2 bands from {zip_file_path.name}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
+
+
+def extract_all_s1_bands(
+    zip_file_path: Path,
+    bbox: Optional[List[float]] = None,
+    to_db: bool = False,
+) -> Optional[Dict]:
+    """Extract ALL Sentinel-1 polarizations for Galileo model compatibility.
+
+    This is a wrapper around extract_sar_composite that extracts both
+    VV and VH polarizations in a format compatible with time series stacking.
+
+    Args:
+        zip_file_path: Path to Sentinel-1 ZIP file
+        bbox: Optional bounding box [min_lon, min_lat, max_lon, max_lat] to crop to
+        to_db: If True, convert to decibels (default: False for raw values)
+
+    Returns:
+        Dictionary containing:
+        - 'bands_array': Multi-polarization array (H, W, 2) with VV and VH
+        - 'band_names': List of polarization names ['VV', 'VH']
+        - 'bounds_wgs84': Geographic bounds in WGS84
+        - 'bounds_utm': Original UTM bounds
+        - 'crs': Coordinate reference system
+        - 'metadata': Additional metadata
+
+        Returns None if extraction fails.
+    """
+    # Extract both polarizations
+    result = extract_sar_composite(
+        zip_file_path, polarizations=["VV", "VH"], to_db=to_db, bbox=bbox
+    )
+
+    if result is None:
+        return None
+
+    # Rename keys to match S2 format for consistency
+    return {
+        "bands_array": result["sar_array"],
+        "band_names": result["polarizations"],
+        "bounds_wgs84": result["bounds_wgs84"],
+        "bounds_utm": result["bounds_utm"],
+        "crs": result["crs"],
+        "metadata": result["metadata"],
+    }

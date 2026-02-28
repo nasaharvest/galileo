@@ -5,6 +5,8 @@ from .enums import S1AcquisitionMode, S1Polarization, S1ProductType, S2Band
 from .image_processing import (
     create_false_color_composite,
     crop_to_bbox,
+    extract_all_s1_bands,
+    extract_all_s2_bands,
     extract_rgb_composite,
     extract_sar_composite,
     get_available_bands,
@@ -18,6 +20,11 @@ from .indices import (
     calculate_savi,
 )
 from .quality import apply_cloud_mask_to_image, extract_cloud_mask
+from .time_series import (
+    create_time_series_tif,
+    generate_date_list,
+    write_multiband_geotiff,
+)
 from .utils import create_validated_bbox, find_granule_directory
 from .visualization import (
     create_band_analysis_plot,
@@ -39,6 +46,8 @@ __all__ = [
     # Image processing
     "extract_rgb_composite",
     "extract_sar_composite",
+    "extract_all_s2_bands",
+    "extract_all_s1_bands",
     "crop_to_bbox",
     "get_available_bands",
     "create_false_color_composite",
@@ -55,6 +64,10 @@ __all__ = [
     # Utilities
     "create_validated_bbox",
     "find_granule_directory",
+    # Time series
+    "create_time_series_tif",
+    "generate_date_list",
+    "write_multiband_geotiff",
     # Visualization
     "create_coverage_map",
     "display_satellite_image",

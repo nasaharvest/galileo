@@ -79,6 +79,7 @@ uv run marimo run copernicus_marimo.py
 - **Time slider**: Browse through multiple satellite images chronologically to compare dates and visualize temporal changes
 - Visualize downloaded imagery with target area overlay
 - Optional crop to exact bounding box for focused analysis
+- **Export to GeoTIFF**: Export any displayed image to georeferenced GeoTIFF format for use in QGIS, ArcGIS, or other GIS software
 - Automatic caching to avoid re-downloads
 
 **Get free Copernicus credentials:**
@@ -96,6 +97,35 @@ COPERNICUS_PASSWORD=your_password
 ```
 
 The GUI will guide you through credential setup and data download.
+
+**Programmatic Usage:**
+
+You can also use the Copernicus client programmatically to fetch and export satellite data:
+
+```python
+from src.data.copernicus import CopernicusClient
+from src.data.copernicus.image_processing import extract_rgb_composite
+
+# Initialize client
+client = CopernicusClient()
+
+# Fetch Sentinel-2 data
+bbox = [6.15, 49.11, 6.16, 49.12]  # [min_lon, min_lat, max_lon, max_lat]
+s2_files = client.fetch_s2(
+    bbox=bbox,
+    start_date="2023-06-01",
+    end_date="2023-06-30",
+    max_cloud_cover=30,
+    max_products=1
+)
+
+# Process and export to GeoTIFF
+image_data = extract_rgb_composite(s2_files[0], bbox=bbox)
+geotiff_path = client.export_to_geotiff(image_data, "output.tif", satellite_type="S2")
+print(f"Exported to {geotiff_path}")
+```
+
+See [examples/export_geotiff_example.py](examples/export_geotiff_example.py) for more detailed examples.
 
 ### Model weights
 The nano model weights are available [on github](data/models/nano).

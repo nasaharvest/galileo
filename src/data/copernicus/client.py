@@ -753,6 +753,132 @@ class CopernicusClient:
         print(f"❌ Download failed after {max_retries} retries")
         return False
 
+    def export_to_geotiff(
+        self,
+        image_data: Dict[str, Any],
+        output_path: Union[str, Path],
+        satellite_type: str = "S2",
+    ) -> Path:
+        """Export processed image data to a GeoTIFF file.
+
+        This method takes pre-processed image data (from extract_rgb_composite or
+        extract_sar_composite) and exports it as a georeferenced GeoTIFF file.
+
+        Args:
+            image_data: Dictionary containing image array and bounds from image_processing functions.
+                       Expected keys:
+                       - 'rgb_array' or 'sar_array': The image data (H, W, C) or (H, W)
+                       - 'bounds_wgs84': Bounding box [min_lon, min_lat, max_lon, max_lat]
+            output_path: Where to save the GeoTIFF file (e.g., "output.tif")
+            satellite_type: Type of satellite data ("S2" for Sentinel-2, "S1" for Sentinel-1)
+
+        Returns:
+            Path object pointing to the created GeoTIFF file
+
+        Raises:
+            ValueError: If image_data is missing required keys or has invalid format
+            ImportError: If rasterio is not installed
+
+        Example:
+            >>> from src.data.copernicus.image_processing import extract_rgb_composite
+            >>> client = CopernicusClient()
+            >>> image_data = extract_rgb_composite(product_path, bbox=[6.15, 49.11, 6.16, 49.12])
+            >>> geotiff_path = client.export_to_geotiff(image_data, "output.tif", "S2")
+            >>> print(f"Exported to {geotiff_path}")
+        """
+        try:
+            import rasterio
+            from rasterio.transform import from_bounds
+        except ImportError:
+            raise ImportError(
+                "rasterio is required for GeoTIFF export. Install with: pip install rasterio"
+            )
+
+        import numpy as np
+
+        # Validate input data
+        if not isinstance(image_data, dict):
+            raise ValueError("image_data must be a dictionary")
+
+        if "bounds_wgs84" not in image_data:
+            raise ValueError("image_data must contain 'bounds_wgs84' key")
+
+        # Get the image array based on satellite type
+        if satellite_type == "S2":
+            if "rgb_array" not in image_data:
+                raise ValueError("image_data must contain 'rgb_array' key for S2 data")
+            array = image_data["rgb_array"]
+        else:  # S1
+            if "sar_array" not in image_data:
+                raise ValueError("image_data must contain 'sar_array' key for S1 data")
+            array = image_data["sar_array"]
+
+        # Get bounds
+        bounds = image_data["bounds_wgs84"]
+        if len(bounds) != 4:
+            raise ValueError("bounds_wgs84 must be [min_lon, min_lat, max_lon, max_lat]")
+
+        # Convert output path to Path object
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Prepare array for export
+        # Rasterio expects (bands, height, width) format
+        if array.ndim == 2:
+            # Single band (grayscale SAR)
+            array = array[np.newaxis, :, :]  # Add band dimension
+            count = 1
+        elif array.ndim == 3:
+            # Multi-band (RGB or multi-polarization)
+            # Convert from (H, W, C) to (C, H, W)
+            array = np.transpose(array, (2, 0, 1))
+            count = array.shape[0]
+        else:
+            raise ValueError(f"Unexpected array dimensions: {array.ndim}")
+
+        height, width = array.shape[1], array.shape[2]
+
+        # Create affine transform from bounds
+        transform = from_bounds(
+            bounds[0],  # west (min_lon)
+            bounds[1],  # south (min_lat)
+            bounds[2],  # east (max_lon)
+            bounds[3],  # north (max_lat)
+            width,
+            height,
+        )
+
+        # Convert to appropriate data type for GeoTIFF
+        # If data is in [0, 1] range (normalized), scale to uint16
+        if array.max() <= 1.0 and array.min() >= 0.0:
+            array = (array * 65535).astype(np.uint16)
+            dtype = rasterio.uint16
+        else:
+            # Keep as float32 for raw values
+            array = array.astype(np.float32)
+            dtype = rasterio.float32
+
+        # Write GeoTIFF
+        with rasterio.open(
+            output_path,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=count,
+            dtype=dtype,
+            crs="EPSG:4326",  # WGS84
+            transform=transform,
+            compress="lzw",  # Compress to save space
+        ) as dst:
+            dst.write(array)
+
+        print(f"✅ Exported GeoTIFF: {output_path}")
+        print(f"   Size: {width}x{height} pixels, {count} band(s)")
+        print(f"   Bounds: {bounds}")
+
+        return output_path
+
     def close(self) -> None:
         """Close the HTTP session and clean up resources.
 
@@ -787,3 +913,189 @@ class CopernicusClient:
             exc_tb: Exception traceback if an exception was raised, None otherwise
         """
         self.close()
+
+    def export_time_series_for_galileo(
+        self,
+        bbox: List[float],
+        start_date: str,
+        end_date: str,
+        output_path: Path,
+        temporal_resolution: str = "weekly",
+        max_products_per_date: int = 1,
+    ) -> Path:
+        """Export Galileo-compatible time series TIF with S1 and S2 data.
+
+        This method downloads Sentinel-1 and Sentinel-2 data for a date range,
+        extracts all spectral bands, and stacks them into a single multi-band
+        GeoTIFF file compatible with the Galileo model.
+
+        ⚠️ IMPORTANT LIMITATIONS:
+        - This exports ONLY S1 and S2 bands (14 bands per timestep)
+        - Galileo expects 449 bands including ERA5, SRTM, VIIRS, etc.
+        - This is Phase 1 - additional data sources needed for full compatibility
+
+        Output Format:
+        - Bands 1-12: S2 spectral bands (B01-B12) for date 1
+        - Bands 13-14: S1 polarizations (VV, VH) for date 1
+        - Bands 15-26: S2 spectral bands for date 2
+        - Bands 27-28: S1 polarizations for date 2
+        - ... and so on
+        - Total: 14 bands × num_dates
+
+        Args:
+            bbox: Bounding box [min_lon, min_lat, max_lon, max_lat]
+            start_date: Start date in 'YYYY-MM-DD' format
+            end_date: End date in 'YYYY-MM-DD' format
+            output_path: Where to save the time series TIF
+            temporal_resolution: One of 'daily', 'weekly', 'monthly'
+            max_products_per_date: Max products to download per date (default: 1)
+
+        Returns:
+            Path to created GeoTIFF file
+
+        Example:
+            >>> client = CopernicusClient()
+            >>> result = client.export_time_series_for_galileo(
+            ...     bbox=[6.15, 49.11, 6.16, 49.12],
+            ...     start_date="2023-01-01",
+            ...     end_date="2023-12-31",
+            ...     output_path=Path("data/exports/time_series.tif"),
+            ...     temporal_resolution="weekly"
+            ... )
+            >>> print(f"Exported {result}")
+        """
+        from .time_series import create_time_series_tif, generate_date_list
+
+        print("=" * 80)
+        print("EXPORTING TIME SERIES FOR GALILEO")
+        print("=" * 80)
+        print(f"Bbox: {bbox}")
+        print(f"Date range: {start_date} to {end_date}")
+        print(f"Temporal resolution: {temporal_resolution}")
+        print()
+
+        # Generate date list
+        dates = generate_date_list(start_date, end_date, temporal_resolution)
+        print(f"Generated {len(dates)} dates to process")
+        print()
+
+        # Download S2 for each date
+        print("📥 DOWNLOADING SENTINEL-2 DATA")
+        print("-" * 80)
+        s2_files: List[Optional[Path]] = []
+        for i, date_obj in enumerate(dates):
+            date_str = date_obj.strftime("%Y-%m-%d")
+            print(f"[{i+1}/{len(dates)}] Downloading S2 for {date_str}...")
+
+            try:
+                files = self.fetch_s2(
+                    bbox=bbox,
+                    start_date=date_str,
+                    end_date=date_str,
+                    max_products=max_products_per_date,
+                    download_data=True,
+                    interactive=False,
+                )
+
+                if files and len(files) > 0:
+                    s2_files.append(files[0])
+                    print(f"  ✅ Downloaded: {files[0].name}")
+                else:
+                    print(f"  ⚠️  No S2 data available for {date_str}")
+                    # Add None placeholder to maintain date alignment
+                    s2_files.append(None)
+            except Exception as e:
+                print(f"  ❌ Error downloading S2 for {date_str}: {e}")
+                s2_files.append(None)
+
+        print()
+        print(
+            f"Successfully downloaded {sum(1 for f in s2_files if f is not None)}/{len(dates)} S2 products"
+        )
+        print()
+
+        # Download S1 for each date
+        print("📥 DOWNLOADING SENTINEL-1 DATA")
+        print("-" * 80)
+        s1_files: List[Optional[Path]] = []
+        for i, date_obj in enumerate(dates):
+            date_str = date_obj.strftime("%Y-%m-%d")
+            print(f"[{i+1}/{len(dates)}] Downloading S1 for {date_str}...")
+
+            try:
+                files = self.fetch_s1(
+                    bbox=bbox,
+                    start_date=date_str,
+                    end_date=date_str,
+                    max_products=max_products_per_date,
+                    download_data=True,
+                )
+
+                if files and len(files) > 0:
+                    s1_files.append(files[0])
+                    print(f"  ✅ Downloaded: {files[0].name}")
+                else:
+                    print(f"  ⚠️  No S1 data available for {date_str}")
+                    s1_files.append(None)
+            except Exception as e:
+                print(f"  ❌ Error downloading S1 for {date_str}: {e}")
+                s1_files.append(None)
+
+        print()
+        print(
+            f"Successfully downloaded {sum(1 for f in s1_files if f is not None)}/{len(dates)} S1 products"
+        )
+        print()
+
+        # Filter out dates where both S1 and S2 are missing
+        valid_indices = [
+            i for i in range(len(dates)) if s2_files[i] is not None and s1_files[i] is not None
+        ]
+
+        if not valid_indices:
+            raise ValueError("No dates with both S1 and S2 data available!")
+
+        # Type assertion: we know these are all non-None after filtering
+        filtered_s2: List[Path] = [s2_files[i] for i in valid_indices]  # type: ignore[misc]
+        filtered_s1: List[Path] = [s1_files[i] for i in valid_indices]  # type: ignore[misc]
+        filtered_dates = [dates[i] for i in valid_indices]
+
+        print(f"Proceeding with {len(filtered_dates)} dates that have both S1 and S2 data")
+        print()
+
+        # Create time series TIF
+        print("🔄 CREATING TIME SERIES TIF")
+        print("-" * 80)
+        result = create_time_series_tif(
+            s2_files=filtered_s2,
+            s1_files=filtered_s1,
+            dates=filtered_dates,
+            bbox=bbox,
+            output_path=output_path,
+            normalize=True,
+        )
+
+        print()
+        print("=" * 80)
+        print("✅ TIME SERIES EXPORT COMPLETE")
+        print("=" * 80)
+        print(f"Output file: {result}")
+        print(f"Dates processed: {len(filtered_dates)}")
+        print(f"Total bands: {14 * len(filtered_dates)} (14 bands × {len(filtered_dates)} dates)")
+        print()
+        print("⚠️  IMPORTANT: This TIF contains ONLY S1+S2 bands")
+        print("   Galileo expects 449 bands including:")
+        print("   - ERA5 weather data")
+        print("   - SRTM elevation")
+        print("   - VIIRS nighttime lights")
+        print("   - Dynamic World land cover")
+        print("   - WorldCereal crop types")
+        print("   - Landscan population")
+        print()
+        print("   Next steps:")
+        print("   1. Test if Galileo works with partial bands")
+        print("   2. If needed, add Phase 2 data sources (ERA5, SRTM, VIIRS)")
+        print("   3. Or train new model with only S1+S2 data")
+        print()
+
+        return result
