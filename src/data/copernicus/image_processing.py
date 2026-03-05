@@ -37,7 +37,7 @@ def _extract_s1_bounds_from_annotation(
     """
     try:
         annotation_dir = safe_dir / "annotation"
-        if not annotation_dir.exists():
+        if not annotation_dir.exists() or not annotation_dir.is_dir():
             print(f"No annotation directory found in {safe_dir.name}")
             return None
 
@@ -59,13 +59,15 @@ def _extract_s1_bounds_from_annotation(
             if elem.tag.endswith("geolocationGridPoint"):
                 lat_elem = elem.find(".//{*}latitude")
                 lon_elem = elem.find(".//{*}longitude")
-                if lat_elem is not None and lon_elem is not None:
+                if (
+                    lat_elem is not None
+                    and lon_elem is not None
+                    and lat_elem.text is not None
+                    and lon_elem.text is not None
+                ):
                     try:
-                        lat_text = lat_elem.text
-                        lon_text = lon_elem.text
-                        if lat_text is not None and lon_text is not None:
-                            lats.append(float(lat_text))
-                            lons.append(float(lon_text))
+                        lats.append(float(lat_elem.text))
+                        lons.append(float(lon_elem.text))
                     except (ValueError, TypeError):
                         continue
 

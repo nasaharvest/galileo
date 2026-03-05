@@ -979,10 +979,7 @@ def _():
         brightness_actual = (brightness - 50) / 100.0
 
         # Gamma: 0→0.3, 50→1.0, 100→3.0
-        if gamma < 50:
-            gamma_actual = 0.3 + (gamma / 50.0) * 0.7  # 0.3 to 1.0
-        else:
-            gamma_actual = 1.0 + ((gamma - 50) / 50.0) * 2.0  # 1.0 to 3.0
+        gamma_actual = 0.3 + (gamma / 100.0) * 2.7
 
         # Make a copy to avoid modifying cached data
         adjusted = image_array.copy()
