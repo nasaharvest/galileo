@@ -755,62 +755,188 @@ def _(
 
 
 @app.cell
-def _(file_metadata, mo, time_slider):
-    """Display time slider controls and current image info."""
+def _(cached_images, file_metadata, mo, time_slider):
+    """Display time slider and adjustment sliders in a compact side-by-side layout."""
     slider_display = None
+    contrast_slider = None
+    brightness_slider = None
+    gamma_slider = None
 
-    if time_slider is not None and len(file_metadata) > 1:
-        # Get current selection
-        _current_idx = time_slider.value
-        _current_meta = file_metadata[_current_idx]
-
-        # Display slider with metadata
-        slider_display = mo.vstack(
-            [
-                mo.md(
-                    f"""
-                    ---
-                    ## 📅 Time Series Visualization
-
-                    Navigate through {len(file_metadata)} images using the slider below.
-                    """
-                ),
-                mo.Html(
-                    f"""
-                    <div style="width: 100%; padding: 20px 0;">
-                        {time_slider}
-                    </div>
-                    """
-                ),
-                mo.md(
-                    f"""
-                    **Image {_current_idx + 1} of {len(file_metadata)}**
-                    - **Date**: {_current_meta['date_str']}
-                    - **File**: `{_current_meta['filename']}`
-                    """
-                ),
-            ]
+    if cached_images and len(cached_images) > 0:
+        # Create adjustment sliders (0-100 range, will be normalized in visualization)
+        contrast_slider = mo.ui.slider(
+            start=0,
+            stop=100,
+            step=1,
+            value=50,  # 50 = 1.0x (no change)
+            label="Contrast",
+            show_value=True,
         )
-    elif file_metadata and len(file_metadata) == 1:
-        # Single image - no slider needed
-        slider_display = mo.md(
-            f"""
-            ---
-            ## 📅 Satellite Image
 
-            **Date**: {file_metadata[0]['date_str']}
-            **File**: `{file_metadata[0]['filename']}`
-            """
+        brightness_slider = mo.ui.slider(
+            start=0,
+            stop=100,
+            step=1,
+            value=50,  # 50 = 0.0 (no change)
+            label="Brightness",
+            show_value=True,
         )
+
+        gamma_slider = mo.ui.slider(
+            start=0,
+            stop=100,
+            step=1,
+            value=50,  # 50 = 1.0 (no change)
+            label="Gamma",
+            show_value=True,
+        )
+
+        # Build the layout based on whether we have time slider
+        if time_slider is not None and len(file_metadata) > 1:
+            # Get current selection
+            _current_idx = time_slider.value
+            _current_meta = file_metadata[_current_idx]
+
+            # Create two-column layout: time slider on left, adjustments on right
+            slider_display = mo.vstack(
+                [
+                    mo.md(
+                        """
+                        ---
+                        ## 📅 Time Series & Image Adjustments
+                        """
+                    ),
+                    mo.hstack(
+                        [
+                            # Left column: Time slider
+                            mo.vstack(
+                                [
+                                    mo.md(f"**Navigate through {len(file_metadata)} images**"),
+                                    time_slider,
+                                    mo.md(
+                                        f"""
+                                        **Image {_current_idx + 1} of {len(file_metadata)}**
+                                        Date: {_current_meta['date_str']}
+                                        File: `{_current_meta['filename'][:40]}...`
+                                        """
+                                    ),
+                                ],
+                                align="start",
+                            ),
+                            # Right column: Adjustment sliders
+                            mo.vstack(
+                                [
+                                    mo.md("**Fine-tune image appearance**"),
+                                    contrast_slider,
+                                    brightness_slider,
+                                    gamma_slider,
+                                ],
+                                align="start",
+                            ),
+                        ],
+                        justify="start",
+                    ),
+                ]
+            )
+        elif file_metadata and len(file_metadata) == 1:
+            # Single image - just show adjustments compactly
+            slider_display = mo.vstack(
+                [
+                    mo.md(
+                        f"""
+                        ---
+                        ## 📅 Satellite Image & Adjustments
+
+                        **Date**: {file_metadata[0]['date_str']} | **File**: `{file_metadata[0]['filename'][:50]}...`
+                        """
+                    ),
+                    mo.hstack(
+                        [
+                            contrast_slider,
+                            brightness_slider,
+                            gamma_slider,
+                        ],
+                        justify="start",
+                    ),
+                ]
+            )
 
     slider_display
-    return
+    return (
+        brightness_slider,
+        contrast_slider,
+        gamma_slider,
+    )
+
+
+@app.cell
+def _():
+    """Apply image adjustments (contrast, brightness, gamma) to image data.
+
+    This function applies non-destructive image adjustments in the correct order:
+    1. Brightness adjustment (add/subtract)
+    2. Contrast adjustment (scale around midpoint)
+    3. Gamma correction (power transformation)
+
+    Args:
+        image_array: Input image array (H, W) or (H, W, C), values in [0, 1] range
+        contrast: Contrast multiplier (0-100 slider → 0.5-3.0 actual)
+        brightness: Brightness offset (0-100 slider → -0.5 to +0.5 actual)
+        gamma: Gamma exponent (0-100 slider → 0.3-3.0 actual)
+
+    Returns:
+        Adjusted image array, clipped to [0, 1] range
+    """
+    import numpy as _np
+
+    def apply_image_adjustments(image_array, contrast, brightness, gamma):
+        """Apply contrast, brightness, and gamma adjustments to image."""
+        # Convert slider values (0-100) to actual adjustment values
+        # Contrast: 0→0.5x, 50→1.0x, 100→3.0x
+        contrast_actual = 0.5 + (contrast / 100.0) * 2.5
+
+        # Brightness: 0→-0.5, 50→0.0, 100→+0.5
+        brightness_actual = (brightness - 50) / 100.0
+
+        # Gamma: 0→0.3, 50→1.0, 100→3.0
+        if gamma < 50:
+            gamma_actual = 0.3 + (gamma / 50.0) * 0.7  # 0.3 to 1.0
+        else:
+            gamma_actual = 1.0 + ((gamma - 50) / 50.0) * 2.0  # 1.0 to 3.0
+
+        # Make a copy to avoid modifying cached data
+        adjusted = image_array.copy()
+
+        # Step 1: Apply brightness (additive)
+        adjusted = adjusted + brightness_actual
+
+        # Step 2: Apply contrast (multiplicative around midpoint)
+        # Formula: (pixel - 0.5) * contrast + 0.5
+        adjusted = (adjusted - 0.5) * contrast_actual + 0.5
+
+        # Step 3: Apply gamma correction (power transformation)
+        # Gamma < 1: brightens shadows, compresses highlights
+        # Gamma > 1: darkens shadows, expands highlights
+        # Ensure non-negative values before applying power
+        adjusted = _np.clip(adjusted, 0, 1)
+        adjusted = _np.power(adjusted, gamma_actual)
+
+        # Final clipping to valid range
+        adjusted = _np.clip(adjusted, 0, 1)
+
+        return adjusted
+
+    return (apply_image_adjustments,)
 
 
 @app.cell
 def _(
+    apply_image_adjustments,
+    brightness_slider,
     cached_images,
+    contrast_slider,
     file_metadata,
+    gamma_slider,
     max_lat,
     max_lon,
     min_lat,
@@ -829,6 +955,7 @@ def _(
     - S2: RGB composite (natural color) with target bbox overlay
     - S1: VV polarization (grayscale) with adaptive contrast
     - Both: Already cropped to target bbox during pre-processing
+    - Image adjustments applied in real-time based on slider values
     """
     viz_result = None
 
@@ -853,6 +980,11 @@ def _(
             # Get the cached image data (already processed!)
             _image_data = cached_images[_selected_idx]
             _metadata = file_metadata[_selected_idx]
+
+            # Get adjustment values from sliders (default to 50 if sliders don't exist)
+            _contrast = contrast_slider.value if contrast_slider is not None else 50
+            _brightness = brightness_slider.value if brightness_slider is not None else 50
+            _gamma = gamma_slider.value if gamma_slider is not None else 50
 
             # Create figure
             fig, ax = plt.subplots(1, 1, figsize=(10, 8))
@@ -915,37 +1047,60 @@ def _(
                 if satellite_type.value == "S2":
                     # RGB image (H, W, 3)
                     if _needs_crop and _display_data is not None:
-                        ax.imshow(_display_data, extent=_display_extent, aspect="auto")
+                        # Apply image adjustments
+                        _adjusted_data = apply_image_adjustments(
+                            _display_data, _contrast, _brightness, _gamma
+                        )
+                        ax.imshow(_adjusted_data, extent=_display_extent, aspect="auto")
                     else:
-                        ax.imshow(_image_data["rgb_array"], extent=_extent, aspect="auto")
+                        # Apply image adjustments
+                        _adjusted_data = apply_image_adjustments(
+                            _image_data["rgb_array"], _contrast, _brightness, _gamma
+                        )
+                        ax.imshow(_adjusted_data, extent=_extent, aspect="auto")
                 else:
                     # SAR grayscale image (H, W, 1) - squeeze to (H, W)
                     if _needs_crop and _display_data is not None:
-                        # Apply percentile clipping for better visualization
+                        # Normalize to 0-1 range for adjustments
                         _vmin, _vmax = np.percentile(_display_data, [2, 98])
+                        _normalized = np.clip(
+                            (_display_data - _vmin) / (_vmax - _vmin + 1e-10), 0, 1
+                        )
+
+                        # Apply image adjustments
+                        _adjusted_data = apply_image_adjustments(
+                            _normalized, _contrast, _brightness, _gamma
+                        )
+
                         ax.imshow(
-                            _display_data,
+                            _adjusted_data,
                             extent=_display_extent,
                             aspect="auto",
                             cmap="gray",
-                            vmin=_vmin,
-                            vmax=_vmax,
+                            vmin=0,
+                            vmax=1,
                         )
                     else:
                         _sar_data = _image_data["sar_array"]
                         if _sar_data.ndim == 3:
                             _sar_data = _sar_data[:, :, 0]  # Extract first polarization
 
-                        # Apply percentile clipping for better visualization
+                        # Normalize to 0-1 range for adjustments
                         _vmin, _vmax = np.percentile(_sar_data, [2, 98])
+                        _normalized = np.clip((_sar_data - _vmin) / (_vmax - _vmin + 1e-10), 0, 1)
+
+                        # Apply image adjustments
+                        _adjusted_data = apply_image_adjustments(
+                            _normalized, _contrast, _brightness, _gamma
+                        )
 
                         ax.imshow(
-                            _sar_data,
+                            _adjusted_data,
                             extent=_extent,
                             aspect="auto",
                             cmap="gray",
-                            vmin=_vmin,
-                            vmax=_vmax,
+                            vmin=0,
+                            vmax=1,
                         )
 
                 # Add target area overlay
