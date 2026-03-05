@@ -838,6 +838,10 @@ class CopernicusClient:
 
         height, width = array.shape[1], array.shape[2]
 
+        # Validate array is not empty
+        if array.size == 0:
+            raise ValueError("Cannot export empty array to GeoTIFF")
+
         # Create affine transform from bounds
         transform = from_bounds(
             bounds[0],  # west (min_lon)
@@ -847,6 +851,11 @@ class CopernicusClient:
             width,
             height,
         )
+
+        # Handle NaN values if present
+        if np.isnan(array).any():
+            print("⚠️ Warning: Array contains NaN values, filling with 0")
+            array = np.nan_to_num(array, nan=0.0)
 
         # Convert to appropriate data type for GeoTIFF
         # If data is in [0, 1] range (normalized), scale to uint16
