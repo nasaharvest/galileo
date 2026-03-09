@@ -292,10 +292,11 @@ def _(datetime, mo, timedelta):
     # Satellite type selection
     # S2 = Sentinel-2 (optical/camera-like imagery)
     # S1 = Sentinel-1 (radar/SAR imagery, works through clouds)
+    # S1+S2 = Both (required for Galileo time series export)
     satellite_type = mo.ui.dropdown(
-        options=["S2", "S1"],
+        options=["S2", "S1", "S1+S2"],
         value="S2",
-        label="Satellite Type (S2=Optical, S1=Radar)",
+        label="Satellite Type (S2=Optical, S1=Radar, S1+S2=Both)",
     )
 
     # Date range inputs
@@ -500,7 +501,7 @@ def _(
                                 interactive=False,
                                 max_products=max_products.value,
                             )
-                        else:
+                        elif satellite_type.value == "S1":
                             _spinner.update(title="Searching for Sentinel-1 products...")
                             # Sentinel-1 parameters:
                             # - product_type: GRD (Ground Range Detected = processed SAR)
@@ -516,6 +517,36 @@ def _(
                                 download_data=True,
                                 max_products=max_products.value,
                             )
+                        else:  # S1+S2
+                            _spinner.update(title="Searching for Sentinel-2 products...")
+                            # Download S2 first
+                            _s2_files = client.fetch_s2(
+                                bbox=_bbox,
+                                start_date=str(start_date.value),
+                                end_date=str(end_date.value),
+                                resolution=10,
+                                max_cloud_cover=30,
+                                product_type="S2MSI2A",
+                                download_data=True,
+                                interactive=False,
+                                max_products=max_products.value,
+                            )
+
+                            _spinner.update(title="Searching for Sentinel-1 products...")
+                            # Download S1 second
+                            _s1_files = client.fetch_s1(
+                                bbox=_bbox,
+                                start_date=str(start_date.value),
+                                end_date=str(end_date.value),
+                                product_type="GRD",
+                                polarization="VV,VH",
+                                orbit_direction="ASCENDING",
+                                download_data=True,
+                                max_products=max_products.value,
+                            )
+
+                            # Store both as a dict for later use
+                            downloaded_files = {"s2": _s2_files, "s1": _s1_files}
                     finally:
                         # Restore stdout
                         sys.stdout = _old_stdout
@@ -561,7 +592,41 @@ def _(
                                     break
 
                     # Check if we got any files
-                    if downloaded_files and len(downloaded_files) > 0:
+                    if satellite_type.value == "S1+S2":
+                        # Handle S1+S2 case
+                        _s2_count = (
+                            len(downloaded_files.get("s2", []))
+                            if isinstance(downloaded_files, dict)
+                            else 0
+                        )
+                        _s1_count = (
+                            len(downloaded_files.get("s1", []))
+                            if isinstance(downloaded_files, dict)
+                            else 0
+                        )
+
+                        if _s2_count > 0 or _s1_count > 0:
+                            _spinner.update(title="Download complete!")
+                            download_result += f"""
+                            ✅ **Downloaded S1+S2 products!**
+
+                            - **S2 (Optical)**: {_s2_count} product(s)
+                            - **S1 (Radar)**: {_s1_count} product(s)
+
+                            Files are cached in `data/cache/copernicus/` for future use.
+
+                            *Note: Visualization will show S2 images. Use "Export Time Series for Galileo" to export both.*
+                            """
+                        else:
+                            download_result += """
+                            ⚠️ **No products found**
+
+                            Try adjusting your search parameters:
+                            - Expand the date range
+                            - Try a different location
+                            - For S2, try a different time of year (less clouds)
+                            """
+                    elif downloaded_files and len(downloaded_files) > 0:
                         _spinner.update(title="Download complete!")
 
                         # Show total available vs downloaded
@@ -653,12 +718,27 @@ def _(
 
     Pre-processing happens once, making slider interactions instant.
     The crop_to_bbox option controls whether to show full context or just target area.
+
+    For S1+S2 mode: Visualizes S2 images (optical), but both S1 and S2 are available for export.
     """
     time_slider = None
     file_metadata = []
     cached_images = []
 
-    if downloaded_files and len(downloaded_files) > 0:
+    # Determine which files to visualize
+    _files_to_visualize = []
+    _viz_satellite_type = satellite_type.value
+
+    if satellite_type.value == "S1+S2":
+        # For S1+S2, visualize S2 images (more intuitive for users)
+        if isinstance(downloaded_files, dict) and "s2" in downloaded_files:
+            _files_to_visualize = downloaded_files["s2"]
+            _viz_satellite_type = "S2"
+    elif downloaded_files and not isinstance(downloaded_files, dict):
+        # Single satellite type (S1 or S2)
+        _files_to_visualize = downloaded_files
+
+    if _files_to_visualize and len(_files_to_visualize) > 0:
         # Show progress while pre-processing
         with mo.status.spinner(title="Pre-processing images for fast slider...") as _spinner:
             import re
@@ -668,8 +748,8 @@ def _(
             _use_bbox = crop_to_bbox.value  # User's choice
 
             # Extract dates and pre-process images
-            for _idx, _file_path in enumerate(downloaded_files):
-                _spinner.update(title=f"Processing image {_idx + 1}/{len(downloaded_files)}...")
+            for _idx, _file_path in enumerate(_files_to_visualize):
+                _spinner.update(title=f"Processing image {_idx + 1}/{len(_files_to_visualize)}...")
 
                 _filename = _file_path.name
 
@@ -686,7 +766,7 @@ def _(
                 # Pre-process the image based on satellite type
                 _processed_data = None
                 try:
-                    if satellite_type.value == "S2":
+                    if _viz_satellite_type == "S2":
                         # Sentinel-2: Extract RGB composite
                         from src.data.copernicus.image_processing import extract_rgb_composite
 
@@ -899,10 +979,7 @@ def _():
         brightness_actual = (brightness - 50) / 100.0
 
         # Gamma: 0→0.3, 50→1.0, 100→3.0
-        if gamma < 50:
-            gamma_actual = 0.3 + (gamma / 50.0) * 0.7  # 0.3 to 1.0
-        else:
-            gamma_actual = 1.0 + ((gamma - 50) / 50.0) * 2.0  # 1.0 to 3.0
+        gamma_actual = 0.3 + (gamma / 100.0) * 2.7
 
         # Make a copy to avoid modifying cached data
         adjusted = image_array.copy()
@@ -1023,13 +1100,16 @@ def _(
                     # Crop the image to the zoom area for faster rendering
                     from src.data.copernicus.image_processing import crop_to_bbox as _crop_fn
 
-                    if satellite_type.value == "S2":
+                    # Check if we have RGB or SAR data
+                    if "rgb_array" in _image_data:
                         _display_data = _crop_fn(_image_data["rgb_array"], _bounds, _zoom_bbox)
-                    else:
+                    elif "sar_array" in _image_data:
                         _sar_data = _image_data["sar_array"]
                         if _sar_data.ndim == 3:
                             _sar_data = _sar_data[:, :, 0]  # Extract first polarization
                         _display_data = _crop_fn(_sar_data, _bounds, _zoom_bbox)
+                    else:
+                        _display_data = None
 
                     if _display_data is not None:
                         # Update extent to match cropped area
@@ -1044,8 +1124,9 @@ def _(
                         _needs_crop = False
 
                 # Display the image array (already normalized and ready)
-                if satellite_type.value == "S2":
-                    # RGB image (H, W, 3)
+                # Check what type of data we have (RGB or SAR)
+                if "rgb_array" in _image_data:
+                    # RGB image (H, W, 3) - for S2 or S1+S2 mode
                     if _needs_crop and _display_data is not None:
                         # Apply image adjustments
                         _adjusted_data = apply_image_adjustments(
@@ -1058,8 +1139,8 @@ def _(
                             _image_data["rgb_array"], _contrast, _brightness, _gamma
                         )
                         ax.imshow(_adjusted_data, extent=_extent, aspect="auto")
-                else:
-                    # SAR grayscale image (H, W, 1) - squeeze to (H, W)
+                elif "sar_array" in _image_data:
+                    # SAR grayscale image (H, W, 1) - squeeze to (H, W) - for S1 mode
                     if _needs_crop and _display_data is not None:
                         # Normalize to 0-1 range for adjustments
                         _vmin, _vmax = np.percentile(_display_data, [2, 98])
@@ -1184,6 +1265,260 @@ def _(
 
     # Return the figure for Marimo to display
     viz_result
+    return
+
+
+@app.cell
+def _(
+    cached_images,
+    downloaded_files,
+    file_metadata,
+    mo,
+    satellite_type,
+    time_slider,
+):
+    """Display export buttons and handle GeoTIFF export."""
+    export_button = None
+    export_time_series_button = None
+    export_display = None
+
+    # Only show export buttons if we have images
+    if cached_images and len(cached_images) > 0:
+        export_button = mo.ui.run_button(label="📥 Export Current Image (RGB/SAR)")
+
+        # Only show time series button for S1+S2 mode with multiple images
+        if satellite_type.value == "S1+S2" and len(cached_images) > 1:
+            export_time_series_button = mo.ui.run_button(
+                label="🚀 Export Time Series for Galileo (All Bands)"
+            )
+
+            # Display both buttons
+            export_display = mo.vstack(
+                [
+                    mo.md("---"),
+                    mo.md("## 💾 Export Options"),
+                    mo.md(
+                        """
+                        **Export Current Image**: Exports the currently displayed S2 image as RGB.
+                        Good for visualization and sharing.
+
+                        **Export Time Series for Galileo**: Exports ALL S2 and S1 images with ALL spectral bands
+                        (12 S2 bands + 2 S1 bands per date) stacked into a single multi-band GeoTIFF.
+                        Compatible with Galileo model (Phase 1: S1+S2 only, missing ERA5/SRTM/etc).
+                        """
+                    ),
+                    mo.hstack([export_button, export_time_series_button], justify="start"),
+                ]
+            )
+        else:
+            # Single satellite type or single image - only show simple export
+            _note = ""
+            if satellite_type.value != "S1+S2":
+                _note = """
+                *Note: Time series export for Galileo requires S1+S2 mode.
+                Select "S1+S2" in Satellite Type above to enable it.*
+                """
+            elif len(cached_images) == 1:
+                _note = """
+                *Note: Time series export requires multiple images.
+                Adjust your search to download more products.*
+                """
+
+            export_display = mo.vstack(
+                [
+                    mo.md("---"),
+                    mo.md("## 💾 Export"),
+                    mo.md(
+                        f"""
+                        Export the current image as a GeoTIFF file.
+
+                        {_note}
+                        """
+                    ),
+                    export_button,
+                ]
+            )
+
+    export_display
+    return (export_button, export_time_series_button)
+
+
+@app.cell
+def _(
+    Path,
+    cached_images,
+    downloaded_files,
+    end_date,
+    export_button,
+    export_time_series_button,
+    file_metadata,
+    max_lat,
+    max_lon,
+    min_lat,
+    min_lon,
+    mo,
+    satellite_type,
+    start_date,
+    time_slider,
+    traceback,
+):
+    """Handle GeoTIFF export when buttons are clicked."""
+    export_result = ""
+
+    # Handle single image export
+    if export_button is not None and export_button.value:
+        try:
+            # Determine which image to export
+            if time_slider is not None:
+                _export_idx = time_slider.value
+            else:
+                _export_idx = 0
+
+            # Get the cached image data
+            _export_data = cached_images[_export_idx]
+            _export_metadata = file_metadata[_export_idx]
+
+            # Create output filename based on original filename
+            _original_name = _export_metadata["filename"]
+            _output_name = _original_name.replace(".zip", ".tif").replace(".SAFE", ".tif")
+            _output_path = Path("data/exports") / _output_name
+
+            # Ensure exports directory exists
+            _output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Export using the client
+            from src.data.copernicus import CopernicusClient as _CopernicusClient
+
+            _client = _CopernicusClient()
+            _result_path = _client.export_to_geotiff(
+                _export_data, _output_path, satellite_type.value
+            )
+
+            export_result = f"""
+            ✅ **Single Image Export Successful!**
+
+            File saved to: `{_result_path}`
+
+            **Image Details:**
+            - Date: {_export_metadata['date_str']}
+            - Satellite: {satellite_type.value}
+            - Bands: 3 (RGB) for S2, or 1-2 (SAR) for S1
+            - Bounds: {_export_data['bounds_wgs84']}
+
+            You can now open this GeoTIFF in QGIS, ArcGIS, or any GIS software.
+            """
+
+        except Exception as e:
+            export_result = f"""
+            ❌ **Export Failed**
+
+            Error: {str(e)}
+
+            Make sure rasterio is installed: `pip install rasterio`
+
+            Check console for detailed error information.
+            """
+            print("Export error details:")
+            print(traceback.format_exc())
+
+    # Handle time series export
+    elif export_time_series_button is not None and export_time_series_button.value:
+        try:
+            # Get bbox from widgets
+            _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
+
+            # Create output filename
+            _output_name = f"time_series_S1_S2_{start_date.value}_{end_date.value}.tif"
+            _output_path = Path("data/exports") / _output_name
+
+            # Ensure exports directory exists
+            _output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Check if we have both S1 and S2 files
+            if (
+                not isinstance(downloaded_files, dict)
+                or "s2" not in downloaded_files
+                or "s1" not in downloaded_files
+            ):
+                export_result = """
+                ❌ **Missing S1 or S2 Data**
+
+                Time series export requires both S1 and S2 data.
+                Please ensure you selected "S1+S2" mode and both types were downloaded successfully.
+                """
+            elif len(downloaded_files["s2"]) == 0 or len(downloaded_files["s1"]) == 0:
+                export_result = f"""
+                ❌ **Insufficient Data**
+
+                - S2 files: {len(downloaded_files.get('s2', []))}
+                - S1 files: {len(downloaded_files.get('s1', []))}
+
+                Both S1 and S2 data are required for time series export.
+                """
+            else:
+                # Show progress
+                with mo.status.spinner(title="Exporting time series...") as _spinner:
+                    _spinner.update(title="Creating multi-band time series TIF...")
+
+                    # Import time series functions
+                    from src.data.copernicus.time_series import create_time_series_tif
+
+                    # Extract dates from file metadata
+                    _dates = [
+                        _meta["date"] for _meta in file_metadata if _meta["date"] is not None
+                    ]
+
+                    if len(_dates) < 2:
+                        export_result = """
+                        ⚠️ **Not Enough Images**
+
+                        Time series export requires at least 2 images.
+                        Please download more products by increasing "Max Products" in the search parameters.
+                        """
+                    else:
+                        # Create time series TIF
+                        _result_path = create_time_series_tif(
+                            s2_files=downloaded_files["s2"],
+                            s1_files=downloaded_files["s1"],
+                            dates=_dates,
+                            bbox=_bbox,
+                            output_path=_output_path,
+                            normalize=True,
+                        )
+
+                        # Success message
+                        export_result = f"""
+                        ✅ **Time Series Export Successful!**
+
+                        File saved to: `{_result_path}`
+
+                        **Details:**
+                        - Dates: {len(_dates)} timesteps
+                        - Total bands: {14 * len(_dates)} (14 bands × {len(_dates)} dates)
+                        - Format: Float64, normalized [0, 1]
+                        - S2 bands: 12 per date (B01-B12)
+                        - S1 bands: 2 per date (VV, VH)
+
+                        **Phase 1 Status:**
+                        ✅ S1 and S2 data included
+                        ❌ Missing: ERA5, SRTM, VIIRS, Dynamic World, WorldCereal, Landscan
+
+                        This TIF has ~3% of the bands Galileo expects (14 vs 449 per timestep).
+                        Test with Galileo to see if it can handle partial bands, or proceed to Phase 2.
+                        """
+
+        except Exception as e:
+            export_result = f"""
+            ❌ **Time Series Export Failed**
+
+            Error: {str(e)}
+
+            Check console for detailed error information.
+            """
+            print("Time series export error details:")
+            print(traceback.format_exc())
+
+    mo.md(export_result) if export_result else None
     return
 
 

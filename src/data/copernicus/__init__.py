@@ -5,6 +5,8 @@ from .enums import S1AcquisitionMode, S1Polarization, S1ProductType, S2Band
 from .image_processing import (
     create_false_color_composite,
     crop_to_bbox,
+    extract_all_s1_bands,
+    extract_all_s2_bands,
     extract_rgb_composite,
     extract_sar_composite,
     get_available_bands,
@@ -39,6 +41,8 @@ __all__ = [
     # Image processing
     "extract_rgb_composite",
     "extract_sar_composite",
+    "extract_all_s2_bands",
+    "extract_all_s1_bands",
     "crop_to_bbox",
     "get_available_bands",
     "create_false_color_composite",

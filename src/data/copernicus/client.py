@@ -753,6 +753,141 @@ class CopernicusClient:
         print(f"❌ Download failed after {max_retries} retries")
         return False
 
+    def export_to_geotiff(
+        self,
+        image_data: Dict[str, Any],
+        output_path: Union[str, Path],
+        satellite_type: str = "S2",
+    ) -> Path:
+        """Export processed image data to a GeoTIFF file.
+
+        This method takes pre-processed image data (from extract_rgb_composite or
+        extract_sar_composite) and exports it as a georeferenced GeoTIFF file.
+
+        Args:
+            image_data: Dictionary containing image array and bounds from image_processing functions.
+                       Expected keys:
+                       - 'rgb_array' or 'sar_array': The image data (H, W, C) or (H, W)
+                       - 'bounds_wgs84': Bounding box [min_lon, min_lat, max_lon, max_lat]
+            output_path: Where to save the GeoTIFF file (e.g., "output.tif")
+            satellite_type: Type of satellite data ("S2" for Sentinel-2, "S1" for Sentinel-1)
+
+        Returns:
+            Path object pointing to the created GeoTIFF file
+
+        Raises:
+            ValueError: If image_data is missing required keys or has invalid format
+            ImportError: If rasterio is not installed
+
+        Example:
+            >>> from src.data.copernicus.image_processing import extract_rgb_composite
+            >>> client = CopernicusClient()
+            >>> image_data = extract_rgb_composite(product_path, bbox=[6.15, 49.11, 6.16, 49.12])
+            >>> geotiff_path = client.export_to_geotiff(image_data, "output.tif", "S2")
+            >>> print(f"Exported to {geotiff_path}")
+        """
+        try:
+            import rasterio
+            from rasterio.transform import from_bounds
+        except ImportError:
+            raise ImportError(
+                "rasterio is required for GeoTIFF export. Install with: pip install rasterio"
+            )
+
+        import numpy as np
+
+        # Validate input data
+        if not isinstance(image_data, dict):
+            raise ValueError("image_data must be a dictionary")
+
+        if "bounds_wgs84" not in image_data:
+            raise ValueError("image_data must contain 'bounds_wgs84' key")
+
+        # Get the image array based on satellite type
+        if satellite_type == "S2":
+            if "rgb_array" not in image_data:
+                raise ValueError("image_data must contain 'rgb_array' key for S2 data")
+            array = image_data["rgb_array"]
+        else:  # S1
+            if "sar_array" not in image_data:
+                raise ValueError("image_data must contain 'sar_array' key for S1 data")
+            array = image_data["sar_array"]
+
+        # Get bounds
+        bounds = image_data["bounds_wgs84"]
+        if len(bounds) != 4:
+            raise ValueError("bounds_wgs84 must be [min_lon, min_lat, max_lon, max_lat]")
+
+        # Convert output path to Path object
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Prepare array for export
+        # Rasterio expects (bands, height, width) format
+        if array.ndim == 2:
+            # Single band (grayscale SAR)
+            array = array[np.newaxis, :, :]  # Add band dimension
+            count = 1
+        elif array.ndim == 3:
+            # Multi-band (RGB or multi-polarization)
+            # Convert from (H, W, C) to (C, H, W)
+            array = np.transpose(array, (2, 0, 1))
+            count = array.shape[0]
+        else:
+            raise ValueError(f"Unexpected array dimensions: {array.ndim}")
+
+        height, width = array.shape[1], array.shape[2]
+
+        # Validate array is not empty
+        if array.size == 0:
+            raise ValueError("Cannot export empty array to GeoTIFF")
+
+        # Create affine transform from bounds
+        transform = from_bounds(
+            bounds[0],  # west (min_lon)
+            bounds[1],  # south (min_lat)
+            bounds[2],  # east (max_lon)
+            bounds[3],  # north (max_lat)
+            width,
+            height,
+        )
+
+        # Handle NaN values if present
+        if np.isnan(array).any():
+            print("⚠️ Warning: Array contains NaN values, filling with 0")
+            array = np.nan_to_num(array, nan=0.0)
+
+        # Convert to appropriate data type for GeoTIFF
+        # If data is in [0, 1] range (normalized), scale to uint16
+        if array.max() <= 1.0 and array.min() >= 0.0:
+            array = (array * 65535).astype(np.uint16)
+            dtype = rasterio.uint16
+        else:
+            # Keep as float32 for raw values
+            array = array.astype(np.float32)
+            dtype = rasterio.float32
+
+        # Write GeoTIFF
+        with rasterio.open(
+            output_path,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=count,
+            dtype=dtype,
+            crs="EPSG:4326",  # WGS84
+            transform=transform,
+            compress="lzw",  # Compress to save space
+        ) as dst:
+            dst.write(array)
+
+        print(f"✅ Exported GeoTIFF: {output_path}")
+        print(f"   Size: {width}x{height} pixels, {count} band(s)")
+        print(f"   Bounds: {bounds}")
+
+        return output_path
+
     def close(self) -> None:
         """Close the HTTP session and clean up resources.
 
