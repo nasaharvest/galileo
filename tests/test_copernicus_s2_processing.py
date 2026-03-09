@@ -135,8 +135,9 @@ class TestSpectralIndices:
         # Mock NIR and Red bands
         nir = np.ones((100, 100), dtype=np.float32) * 0.8
         red = np.ones((100, 100), dtype=np.float32) * 0.2
+        bounds = (-180, -90, 180, 90)
 
-        mock_extract.side_effect = [nir, red]
+        mock_extract.side_effect = [(nir, bounds), (red, bounds)]
 
         result = calculate_ndvi(Path("fake.zip"))
 
@@ -161,8 +162,9 @@ class TestSpectralIndices:
         """Test NDWI calculation."""
         green = np.ones((100, 100), dtype=np.float32) * 0.6
         nir = np.ones((100, 100), dtype=np.float32) * 0.2
+        bounds = (-180, -90, 180, 90)
 
-        mock_extract.side_effect = [green, nir]
+        mock_extract.side_effect = [(green, bounds), (nir, bounds)]
 
         result = calculate_ndwi(Path("fake.zip"))
 
@@ -177,8 +179,9 @@ class TestSpectralIndices:
         nir = np.ones((100, 100), dtype=np.float32) * 0.8
         red = np.ones((100, 100), dtype=np.float32) * 0.2
         blue = np.ones((100, 100), dtype=np.float32) * 0.1
+        bounds = (-180, -90, 180, 90)
 
-        mock_extract.side_effect = [nir, red, blue]
+        mock_extract.side_effect = [(nir, bounds), (red, bounds), (blue, bounds)]
 
         result = calculate_evi(Path("fake.zip"))
 
@@ -191,8 +194,9 @@ class TestSpectralIndices:
         """Test SAVI calculation."""
         nir = np.ones((100, 100), dtype=np.float32) * 0.8
         red = np.ones((100, 100), dtype=np.float32) * 0.2
+        bounds = (-180, -90, 180, 90)
 
-        mock_extract.side_effect = [nir, red]
+        mock_extract.side_effect = [(nir, bounds), (red, bounds)]
 
         result = calculate_savi(Path("fake.zip"), L=0.5)
 
@@ -205,8 +209,9 @@ class TestSpectralIndices:
         """Test NBR calculation."""
         nir = np.ones((100, 100), dtype=np.float32) * 0.8
         swir = np.ones((100, 100), dtype=np.float32) * 0.2
+        bounds = (-180, -90, 180, 90)
 
-        mock_extract.side_effect = [nir, swir]
+        mock_extract.side_effect = [(nir, bounds), (swir, bounds)]
 
         result = calculate_nbr(Path("fake.zip"))
 
