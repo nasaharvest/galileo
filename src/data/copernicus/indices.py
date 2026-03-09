@@ -26,7 +26,7 @@ def _extract_band(
         bbox: Optional bounding box [min_lon, min_lat, max_lon, max_lat] to crop
 
     Returns:
-        Tuple of (band_data, bounds_wgs84) or (None, None) if extraction fails
+        Tuple of (band_data, bounds_wgs84) or None if extraction fails
         - band_data: Band data as numpy array
         - bounds_wgs84: Geographic bounds in WGS84 (min_lon, min_lat, max_lon, max_lat)
     """
@@ -65,7 +65,7 @@ def _extract_band(
 
                 if not band_file_path:
                     print(f"Band {band_name} not found in {zip_file_path.name}")
-                    return None, None
+                    return None
 
                 # Extract only this one file
                 zip_ref.extract(band_file_path, temp_path)
@@ -74,7 +74,7 @@ def _extract_band(
             extracted_file = temp_path / band_file_path
             if not extracted_file.exists():
                 print(f"Extracted file not found: {extracted_file}")
-                return None, None
+                return None
 
             with rasterio.open(extracted_file) as src:
                 band_data = src.read(1).astype(np.float32)
@@ -102,7 +102,7 @@ def _extract_band(
         import traceback
 
         traceback.print_exc()
-        return None, None
+        return None
 
 
 def calculate_ndvi(zip_file_path: Path, bbox: Optional[list] = None) -> Optional[Dict]:
