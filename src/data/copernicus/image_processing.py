@@ -197,6 +197,22 @@ def extract_rgb_composite(
             rgb_bands = []
             bounds = None
             crs = None
+            target_shape = None
+
+            # First pass: determine target shape (use highest resolution)
+            for band in bands:
+                if band in band_files:
+                    with rasterio.open(band_files[band]) as src:
+                        band_shape = (src.height, src.width)
+                        if target_shape is None or (band_shape[0] * band_shape[1]) > (
+                            target_shape[0] * target_shape[1]
+                        ):
+                            target_shape = band_shape
+
+            # Second pass: read and resample bands to target shape
+            if target_shape is None:
+                print("Error: Could not determine target shape")
+                return None
 
             for band in bands:
                 if band in band_files:
@@ -207,6 +223,19 @@ def extract_rgb_composite(
                         if bounds is None:
                             bounds = src.bounds
                             crs = src.crs
+
+                        # Resample if needed (e.g., 20m bands to 10m resolution)
+                        if band_data.shape != target_shape:
+                            from scipy.ndimage import zoom
+
+                            zoom_factor = (
+                                target_shape[0] / band_data.shape[0],
+                                target_shape[1] / band_data.shape[1],
+                            )
+                            band_data = zoom(
+                                band_data, zoom_factor, order=1
+                            )  # Bilinear interpolation
+                            print(f"Resampled {band} from {band_data.shape} to {target_shape}")
 
                         rgb_bands.append(band_data)
 

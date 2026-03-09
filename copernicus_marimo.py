@@ -835,7 +835,37 @@ def _(
 
 
 @app.cell
-def _(cached_images, file_metadata, mo, time_slider):
+def _(cached_images, mo, satellite_type):
+    """Create band recipe selector (independent of time slider to maintain state)."""
+    band_recipe_selector = None
+
+    if cached_images and len(cached_images) > 0:
+        from src.data.copernicus.band_recipes import get_available_recipes
+
+        _recipes = get_available_recipes()
+
+        # Filter recipes based on satellite type
+        if satellite_type.value == "S2":
+            # S2: Show optical recipes only
+            _recipe_names = [r.name for rid, r in _recipes.items() if not rid.startswith("sar_")]
+        elif satellite_type.value == "S1":
+            # S1: Show SAR recipes only
+            _recipe_names = [r.name for rid, r in _recipes.items() if rid.startswith("sar_")]
+        else:  # S1+S2
+            # S1+S2: Show optical recipes (visualizing S2)
+            _recipe_names = [r.name for rid, r in _recipes.items() if not rid.startswith("sar_")]
+
+        if _recipe_names:
+            band_recipe_selector = mo.ui.dropdown(
+                options=_recipe_names,
+                label="Band Recipe",
+            )
+
+    return (band_recipe_selector,)
+
+
+@app.cell
+def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
     """Display time slider and adjustment sliders in a compact side-by-side layout."""
     slider_display = None
     contrast_slider = None
@@ -877,6 +907,18 @@ def _(cached_images, file_metadata, mo, time_slider):
             _current_idx = time_slider.value
             _current_meta = file_metadata[_current_idx]
 
+            # Build adjustment controls
+            _adjustment_controls = [
+                mo.md("**Fine-tune image appearance**"),
+                contrast_slider,
+                brightness_slider,
+                gamma_slider,
+            ]
+
+            # Add band recipe selector if available
+            if band_recipe_selector is not None:
+                _adjustment_controls.insert(1, band_recipe_selector)
+
             # Create two-column layout: time slider on left, adjustments on right
             slider_display = mo.vstack(
                 [
@@ -903,22 +945,25 @@ def _(cached_images, file_metadata, mo, time_slider):
                                 ],
                                 align="start",
                             ),
-                            # Right column: Adjustment sliders
-                            mo.vstack(
-                                [
-                                    mo.md("**Fine-tune image appearance**"),
-                                    contrast_slider,
-                                    brightness_slider,
-                                    gamma_slider,
-                                ],
-                                align="start",
-                            ),
+                            # Right column: Adjustment sliders and band recipe
+                            mo.vstack(_adjustment_controls, align="start"),
                         ],
                         justify="start",
                     ),
                 ]
             )
         elif file_metadata and len(file_metadata) == 1:
+            # Build adjustment controls
+            _adjustment_controls = [
+                contrast_slider,
+                brightness_slider,
+                gamma_slider,
+            ]
+
+            # Add band recipe selector if available
+            if band_recipe_selector is not None:
+                _adjustment_controls.insert(0, band_recipe_selector)
+
             # Single image - just show adjustments compactly
             slider_display = mo.vstack(
                 [
@@ -930,14 +975,7 @@ def _(cached_images, file_metadata, mo, time_slider):
                         **Date**: {file_metadata[0]['date_str']} | **File**: `{file_metadata[0]['filename'][:50]}...`
                         """
                     ),
-                    mo.hstack(
-                        [
-                            contrast_slider,
-                            brightness_slider,
-                            gamma_slider,
-                        ],
-                        justify="start",
-                    ),
+                    mo.hstack(_adjustment_controls, justify="start"),
                 ]
             )
 
@@ -1009,9 +1047,11 @@ def _():
 @app.cell
 def _(
     apply_image_adjustments,
+    band_recipe_selector,
     brightness_slider,
     cached_images,
     contrast_slider,
+    crop_to_bbox,
     file_metadata,
     gamma_slider,
     max_lat,
@@ -1023,13 +1063,13 @@ def _(
     time_slider,
     traceback,
 ):
-    """Visualize the selected satellite image using cached data.
+    """Visualize the selected satellite image using cached data with band recipe support.
 
     This cell displays pre-processed images from cache, making slider
     interactions nearly instant (no disk I/O or processing needed).
 
     Visualization details:
-    - S2: RGB composite (natural color) with target bbox overlay
+    - S2: Supports multiple band recipes (True Color, False Color, Agriculture, NDVI, NDWI)
     - S1: VV polarization (grayscale) with adaptive contrast
     - Both: Already cropped to target bbox during pre-processing
     - Image adjustments applied in real-time based on slider values
@@ -1063,12 +1103,46 @@ def _(
             _brightness = brightness_slider.value if brightness_slider is not None else 50
             _gamma = gamma_slider.value if gamma_slider is not None else 50
 
+            # Get selected band recipe
+            _selected_recipe = None
+            if band_recipe_selector is not None:
+                _selected_recipe = band_recipe_selector.value
+
+            # Apply band recipe if needed
+            _display_data = _image_data
+            _needs_recipe_processing = False
+
+            # Determine if we need to reprocess with recipe
+            if _selected_recipe is not None:
+                if satellite_type.value in ["S2", "S1+S2"]:
+                    # S2: Reprocess if not True Color
+                    _needs_recipe_processing = _selected_recipe != "True Color (RGB)"
+                elif satellite_type.value == "S1":
+                    # S1: Reprocess if not default SAR VV
+                    _needs_recipe_processing = _selected_recipe != "SAR VV (Surface)"
+
+            if _needs_recipe_processing:
+                # Need to reprocess with the selected recipe
+                from src.data.copernicus.band_recipes import apply_band_recipe
+
+                # Only pass bbox if crop_to_bbox is enabled
+                _recipe_bbox = _viz_bbox if crop_to_bbox.value else None
+
+                _recipe_result = apply_band_recipe(
+                    _metadata["path"], _selected_recipe, bbox=_recipe_bbox
+                )
+                if _recipe_result is not None:
+                    _display_data = _recipe_result
+                else:
+                    # Fall back to cached data if recipe fails
+                    print(f"Failed to apply recipe '{_selected_recipe}', using cached data")
+
             # Create figure
             fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
-            # Display the cached image
-            if _image_data is not None and _image_data.get("bounds_wgs84") is not None:
-                _bounds = _image_data["bounds_wgs84"]
+            # Display the image
+            if _display_data is not None and _display_data.get("bounds_wgs84") is not None:
+                _bounds = _display_data["bounds_wgs84"]
                 _extent = (
                     _bounds[0],
                     _bounds[2],
@@ -1078,7 +1152,7 @@ def _(
 
                 # PERFORMANCE FIX: If image is not cropped, crop it now for visualization
                 # This prevents matplotlib from rendering millions of pixels that won't be visible
-                _display_data = None
+                _display_array = None
                 _display_extent = _extent
 
                 # Calculate zoom area with padding
@@ -1100,18 +1174,22 @@ def _(
                     # Crop the image to the zoom area for faster rendering
                     from src.data.copernicus.image_processing import crop_to_bbox as _crop_fn
 
-                    # Check if we have RGB or SAR data
-                    if "rgb_array" in _image_data:
-                        _display_data = _crop_fn(_image_data["rgb_array"], _bounds, _zoom_bbox)
-                    elif "sar_array" in _image_data:
-                        _sar_data = _image_data["sar_array"]
+                    # Check if we have RGB, index, or SAR data
+                    if "rgb_array" in _display_data:
+                        _display_array = _crop_fn(_display_data["rgb_array"], _bounds, _zoom_bbox)
+                    elif "index_array" in _display_data:
+                        _display_array = _crop_fn(
+                            _display_data["index_array"], _bounds, _zoom_bbox
+                        )
+                    elif "sar_array" in _display_data:
+                        _sar_data = _display_data["sar_array"]
                         if _sar_data.ndim == 3:
                             _sar_data = _sar_data[:, :, 0]  # Extract first polarization
-                        _display_data = _crop_fn(_sar_data, _bounds, _zoom_bbox)
+                        _display_array = _crop_fn(_sar_data, _bounds, _zoom_bbox)
                     else:
-                        _display_data = None
+                        _display_array = None
 
-                    if _display_data is not None:
+                    if _display_array is not None:
                         # Update extent to match cropped area
                         _display_extent = (
                             _zoom_bbox[0],
@@ -1124,28 +1202,85 @@ def _(
                         _needs_crop = False
 
                 # Display the image array (already normalized and ready)
-                # Check what type of data we have (RGB or SAR)
-                if "rgb_array" in _image_data:
+                # Check what type of data we have (RGB, index, or SAR)
+                if "rgb_array" in _display_data:
                     # RGB image (H, W, 3) - for S2 or S1+S2 mode
-                    if _needs_crop and _display_data is not None:
+                    if _needs_crop and _display_array is not None:
                         # Apply image adjustments
                         _adjusted_data = apply_image_adjustments(
-                            _display_data, _contrast, _brightness, _gamma
+                            _display_array, _contrast, _brightness, _gamma
                         )
                         ax.imshow(_adjusted_data, extent=_display_extent, aspect="auto")
                     else:
                         # Apply image adjustments
                         _adjusted_data = apply_image_adjustments(
-                            _image_data["rgb_array"], _contrast, _brightness, _gamma
+                            _display_data["rgb_array"], _contrast, _brightness, _gamma
                         )
                         ax.imshow(_adjusted_data, extent=_extent, aspect="auto")
-                elif "sar_array" in _image_data:
-                    # SAR grayscale image (H, W, 1) - squeeze to (H, W) - for S1 mode
-                    if _needs_crop and _display_data is not None:
-                        # Normalize to 0-1 range for adjustments
-                        _vmin, _vmax = np.percentile(_display_data, [2, 98])
+                elif "index_array" in _display_data:
+                    # Spectral index or SAR data (H, W) - for NDVI, NDWI, SAR VV/VH, etc.
+                    _index_array = (
+                        _display_array
+                        if _needs_crop and _display_array is not None
+                        else _display_data["index_array"]
+                    )
+
+                    # Check if this is SAR data (needs different normalization)
+                    _is_sar = _display_data.get("metadata", {}).get("type") == "sar"
+
+                    if _is_sar:
+                        # SAR data: Use percentile-based normalization (dB values vary)
+                        _vmin, _vmax = np.percentile(_index_array, [2, 98])
                         _normalized = np.clip(
-                            (_display_data - _vmin) / (_vmax - _vmin + 1e-10), 0, 1
+                            (_index_array - _vmin) / (_vmax - _vmin + 1e-10), 0, 1
+                        )
+                    else:
+                        # Spectral indices: Use fixed value range
+                        _vmin, _vmax = _display_data.get("value_range", (-1, 1))
+                        _normalized = np.clip(
+                            (_index_array - _vmin) / (_vmax - _vmin + 1e-10), 0, 1
+                        )
+
+                    # Apply image adjustments
+                    _adjusted_data = apply_image_adjustments(
+                        _normalized, _contrast, _brightness, _gamma
+                    )
+
+                    # Display with appropriate colormap
+                    _cmap = _display_data.get("colormap", "RdYlGn")
+                    _extent_to_use = _display_extent if _needs_crop else _extent
+                    im = ax.imshow(
+                        _adjusted_data,
+                        extent=_extent_to_use,
+                        aspect="auto",
+                        cmap=_cmap,
+                        vmin=0,
+                        vmax=1,
+                    )
+                    # Add colorbar for index visualization
+                    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+                    # Label colorbar appropriately
+                    if _is_sar:
+                        _pol_name = _display_data.get("metadata", {}).get("polarization", "SAR")
+                        cbar.set_label(
+                            f"{_pol_name} Backscatter (dB)",
+                            rotation=270,
+                            labelpad=15,
+                        )
+                    else:
+                        cbar.set_label(
+                            _display_data.get("metadata", {}).get("index", "Index Value"),
+                            rotation=270,
+                            labelpad=15,
+                        )
+                elif "sar_array" in _display_data:
+                    # SAR grayscale image (H, W, 1) - squeeze to (H, W) - for S1 mode
+                    if _needs_crop and _display_array is not None:
+                        # Normalize to 0-1 range for adjustments
+                        _vmin, _vmax = np.percentile(_display_array, [2, 98])
+                        _normalized = np.clip(
+                            (_display_array - _vmin) / (_vmax - _vmin + 1e-10), 0, 1
                         )
 
                         # Apply image adjustments
@@ -1162,7 +1297,7 @@ def _(
                             vmax=1,
                         )
                     else:
-                        _sar_data = _image_data["sar_array"]
+                        _sar_data = _display_data["sar_array"]
                         if _sar_data.ndim == 3:
                             _sar_data = _sar_data[:, :, 0]  # Extract first polarization
 
@@ -1217,7 +1352,11 @@ def _(
                 ax.set_xlabel("Longitude (°E)", fontsize=12)
                 ax.set_ylabel("Latitude (°N)", fontsize=12)
 
-                _title = f"{satellite_type.value} Image - {_metadata['date_str']}\n{_metadata['filename'][:50]}..."
+                # Update title to show recipe name
+                _recipe_name = _selected_recipe if _selected_recipe else satellite_type.value
+                _title = (
+                    f"{_recipe_name} - {_metadata['date_str']}\n{_metadata['filename'][:50]}..."
+                )
                 ax.set_title(_title, fontsize=11, fontweight="bold")
 
                 ax.grid(True, alpha=0.3, color="white")
