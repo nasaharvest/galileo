@@ -1,5 +1,11 @@
 """Copernicus Data Space Ecosystem client for fetching Sentinel-1 and Sentinel-2 data."""
 
+from .band_recipes import (
+    apply_band_recipe,
+    get_available_recipes,
+    get_recipe_by_name,
+    get_recipe_names,
+)
 from .client import CopernicusClient
 from .enums import S1AcquisitionMode, S1Polarization, S1ProductType, S2Band
 from .image_processing import (
@@ -38,6 +44,11 @@ __all__ = [
     "S1ProductType",
     "S1Polarization",
     "S1AcquisitionMode",
+    # Band recipes
+    "get_available_recipes",
+    "get_recipe_names",
+    "get_recipe_by_name",
+    "apply_band_recipe",
     # Image processing
     "extract_rgb_composite",
     "extract_sar_composite",

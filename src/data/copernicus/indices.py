@@ -6,48 +6,102 @@ and are widely used in remote sensing applications.
 """
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import rasterio
 
-from .utils import extract_s2_safe_structure
 
-
-def _extract_band(zip_file_path: Path, band_name: str) -> Optional[np.ndarray]:
+def _extract_band(
+    zip_file_path: Path, band_name: str, bbox: Optional[list] = None
+) -> Optional[Tuple[np.ndarray, Optional[Tuple]]]:
     """Extract a single band from Sentinel-2 ZIP file.
 
-    Helper function to read individual spectral bands.
+    Helper function to read individual spectral bands with optional bbox cropping.
+    Uses selective extraction (only extracts the needed band file, not the entire ZIP).
 
     Args:
         zip_file_path: Path to Sentinel-2 ZIP file
         band_name: Band identifier (e.g., 'B04', 'B08', 'B11')
+        bbox: Optional bounding box [min_lon, min_lat, max_lon, max_lat] to crop
 
     Returns:
-        Band data as numpy array, or None if extraction fails
+        Tuple of (band_data, bounds_wgs84) or None if extraction fails
+        - band_data: Band data as numpy array
+        - bounds_wgs84: Geographic bounds in WGS84 (min_lon, min_lat, max_lon, max_lat)
     """
+    import tempfile
+    import zipfile
+
+    from rasterio.warp import transform_bounds
+
+    from .image_processing import crop_to_bbox
+
     try:
-        with extract_s2_safe_structure(zip_file_path) as (safe_dir, granule_dir):
-            img_dir = granule_dir / "IMG_DATA"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
 
-            # Try multiple naming patterns
-            patterns = [
-                f"*_{band_name}_10m.jp2",
-                f"*_{band_name}_20m.jp2",
-                f"*_{band_name}.jp2",
-                f"*{band_name}.jp2",
-            ]
+            # Selective extraction: only extract the band file we need
+            with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
+                all_files = zip_ref.namelist()
 
-            for pattern in patterns:
-                band_matches = list(img_dir.glob(pattern))
-                if band_matches:
-                    with rasterio.open(band_matches[0]) as src:
-                        return src.read(1).astype(np.float32)
+                # Find the band file
+                band_file_path = None
+                patterns = [
+                    f"_{band_name}_10m.jp2",
+                    f"_{band_name}_20m.jp2",
+                    f"_{band_name}.jp2",
+                    f"{band_name}.jp2",
+                ]
 
-            return None
+                for file_path in all_files:
+                    filename = file_path.split("/")[-1]
+                    for pattern in patterns:
+                        if pattern in filename:
+                            band_file_path = file_path
+                            break
+                    if band_file_path:
+                        break
+
+                if not band_file_path:
+                    print(f"Band {band_name} not found in {zip_file_path.name}")
+                    return None
+
+                # Extract only this one file
+                zip_ref.extract(band_file_path, temp_path)
+
+            # Open and read the band
+            extracted_file = temp_path / band_file_path
+            if not extracted_file.exists():
+                print(f"Extracted file not found: {extracted_file}")
+                return None
+
+            with rasterio.open(extracted_file) as src:
+                band_data = src.read(1).astype(np.float32)
+
+                # Get bounds
+                bounds = src.bounds
+                crs = src.crs
+
+                # Convert bounds to WGS84
+                bounds_wgs84 = transform_bounds(
+                    crs, "EPSG:4326", bounds.left, bounds.bottom, bounds.right, bounds.top
+                )
+
+                # Apply bbox cropping if requested
+                if bbox is not None:
+                    cropped = crop_to_bbox(band_data, bounds_wgs84, bbox)
+                    if cropped is not None:
+                        band_data = cropped
+                        bounds_wgs84 = tuple(bbox)
+
+                return band_data, bounds_wgs84
 
     except Exception as e:
         print(f"Error extracting band {band_name}: {e}")
+        import traceback
+
+        traceback.print_exc()
         return None
 
 
@@ -95,16 +149,25 @@ def calculate_ndvi(zip_file_path: Path, bbox: Optional[list] = None) -> Optional
         - 'metadata': Information about calculation
     """
     # Extract NIR band (B08)
-    nir = _extract_band(zip_file_path, "B08")
-    if nir is None:
+    nir_result = _extract_band(zip_file_path, "B08", bbox)
+    if nir_result is None:
         print("Failed to extract NIR band (B08)")
         return None
+    nir, bounds_wgs84 = nir_result
 
     # Extract Red band (B04)
-    red = _extract_band(zip_file_path, "B04")
-    if red is None:
+    red_result = _extract_band(zip_file_path, "B04", bbox)
+    if red_result is None:
         print("Failed to extract Red band (B04)")
         return None
+    red, _ = red_result
+
+    # Resample if shapes don't match
+    if red.shape != nir.shape:
+        from scipy.ndimage import zoom
+
+        zoom_factor = (nir.shape[0] / red.shape[0], nir.shape[1] / red.shape[1])
+        red = zoom(red, zoom_factor, order=1)
 
     # Calculate NDVI using normalized difference
     ndvi = (nir - red) / (nir + red + 1e-8)
@@ -114,6 +177,7 @@ def calculate_ndvi(zip_file_path: Path, bbox: Optional[list] = None) -> Optional
 
     return {
         "ndvi": ndvi,
+        "bounds_wgs84": bounds_wgs84,
         "metadata": {
             "index": "NDVI",
             "formula": "(NIR - Red) / (NIR + Red)",
@@ -164,16 +228,25 @@ def calculate_ndwi(zip_file_path: Path, bbox: Optional[list] = None) -> Optional
         Dictionary with 'ndwi' array and metadata
     """
     # Extract Green band (B03)
-    green = _extract_band(zip_file_path, "B03")
-    if green is None:
+    green_result = _extract_band(zip_file_path, "B03", bbox)
+    if green_result is None:
         print("Failed to extract Green band (B03)")
         return None
+    green, bounds_wgs84 = green_result
 
     # Extract NIR band (B08)
-    nir = _extract_band(zip_file_path, "B08")
-    if nir is None:
+    nir_result = _extract_band(zip_file_path, "B08", bbox)
+    if nir_result is None:
         print("Failed to extract NIR band (B08)")
         return None
+    nir, _ = nir_result
+
+    # Resample if shapes don't match
+    if green.shape != nir.shape:
+        from scipy.ndimage import zoom
+
+        zoom_factor = (nir.shape[0] / green.shape[0], nir.shape[1] / green.shape[1])
+        green = zoom(green, zoom_factor, order=1)
 
     # Calculate NDWI
     ndwi = (green - nir) / (green + nir + 1e-8)
@@ -181,6 +254,7 @@ def calculate_ndwi(zip_file_path: Path, bbox: Optional[list] = None) -> Optional
 
     return {
         "ndwi": ndwi,
+        "bounds_wgs84": bounds_wgs84,
         "metadata": {
             "index": "NDWI",
             "formula": "(Green - NIR) / (Green + NIR)",
@@ -233,13 +307,29 @@ def calculate_evi(zip_file_path: Path, bbox: Optional[list] = None) -> Optional[
         Dictionary with 'evi' array and metadata
     """
     # Extract required bands
-    nir = _extract_band(zip_file_path, "B08")
-    red = _extract_band(zip_file_path, "B04")
-    blue = _extract_band(zip_file_path, "B02")
+    nir_result = _extract_band(zip_file_path, "B08", bbox)
+    red_result = _extract_band(zip_file_path, "B04", bbox)
+    blue_result = _extract_band(zip_file_path, "B02", bbox)
 
-    if nir is None or red is None or blue is None:
+    if nir_result is None or red_result is None or blue_result is None:
         print("Failed to extract required bands for EVI")
         return None
+
+    nir, bounds_wgs84 = nir_result
+    red, _ = red_result
+    blue, _ = blue_result
+
+    # Resample if shapes don't match
+    if red.shape != nir.shape:
+        from scipy.ndimage import zoom
+
+        zoom_factor = (nir.shape[0] / red.shape[0], nir.shape[1] / red.shape[1])
+        red = zoom(red, zoom_factor, order=1)
+    if blue.shape != nir.shape:
+        from scipy.ndimage import zoom
+
+        zoom_factor = (nir.shape[0] / blue.shape[0], nir.shape[1] / blue.shape[1])
+        blue = zoom(blue, zoom_factor, order=1)
 
     # Calculate EVI with standard coefficients
     evi = 2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue + 1 + 1e-8)
@@ -249,6 +339,7 @@ def calculate_evi(zip_file_path: Path, bbox: Optional[list] = None) -> Optional[
 
     return {
         "evi": evi,
+        "bounds_wgs84": bounds_wgs84,
         "metadata": {
             "index": "EVI",
             "formula": "2.5 * (NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1)",
@@ -309,12 +400,22 @@ def calculate_savi(
         Dictionary with 'savi' array and metadata
     """
     # Extract required bands
-    nir = _extract_band(zip_file_path, "B08")
-    red = _extract_band(zip_file_path, "B04")
+    nir_result = _extract_band(zip_file_path, "B08", bbox)
+    red_result = _extract_band(zip_file_path, "B04", bbox)
 
-    if nir is None or red is None:
+    if nir_result is None or red_result is None:
         print("Failed to extract required bands for SAVI")
         return None
+
+    nir, bounds_wgs84 = nir_result
+    red, _ = red_result
+
+    # Resample if shapes don't match
+    if red.shape != nir.shape:
+        from scipy.ndimage import zoom
+
+        zoom_factor = (nir.shape[0] / red.shape[0], nir.shape[1] / red.shape[1])
+        red = zoom(red, zoom_factor, order=1)
 
     # Calculate SAVI with soil adjustment factor
     savi = ((nir - red) / (nir + red + L + 1e-8)) * (1 + L)
@@ -322,6 +423,7 @@ def calculate_savi(
 
     return {
         "savi": savi,
+        "bounds_wgs84": bounds_wgs84,
         "metadata": {
             "index": "SAVI",
             "formula": f"((NIR - Red) / (NIR + Red + {L})) * (1 + {L})",
@@ -379,16 +481,18 @@ def calculate_nbr(zip_file_path: Path, bbox: Optional[list] = None) -> Optional[
         Dictionary with 'nbr' array and metadata
     """
     # Extract NIR band (B08)
-    nir = _extract_band(zip_file_path, "B08")
-    if nir is None:
+    nir_result = _extract_band(zip_file_path, "B08", bbox)
+    if nir_result is None:
         print("Failed to extract NIR band (B08)")
         return None
+    nir, bounds_wgs84 = nir_result
 
     # Extract SWIR band (B12)
-    swir = _extract_band(zip_file_path, "B12")
-    if swir is None:
+    swir_result = _extract_band(zip_file_path, "B12", bbox)
+    if swir_result is None:
         print("Failed to extract SWIR band (B12)")
         return None
+    swir, _ = swir_result
 
     # Resample SWIR to match NIR resolution if needed
     if swir.shape != nir.shape:
@@ -403,6 +507,7 @@ def calculate_nbr(zip_file_path: Path, bbox: Optional[list] = None) -> Optional[
 
     return {
         "nbr": nbr,
+        "bounds_wgs84": bounds_wgs84,
         "metadata": {
             "index": "NBR",
             "formula": "(NIR - SWIR) / (NIR + SWIR)",
