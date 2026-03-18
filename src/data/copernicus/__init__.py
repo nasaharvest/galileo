@@ -10,6 +10,7 @@ from .client import CopernicusClient
 from .enums import S1AcquisitionMode, S1Polarization, S1ProductType, S2Band
 from .galileo_adapter import (
     copernicus_to_galileo_tif,
+    embeddings_to_geotiff,
     get_band_info,
     validate_galileo_tif,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "S1AcquisitionMode",
     # Galileo integration
     "copernicus_to_galileo_tif",
+    "embeddings_to_geotiff",
     "validate_galileo_tif",
     "get_band_info",
     # Band recipes

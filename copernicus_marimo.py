@@ -1682,5 +1682,336 @@ def _(
     return
 
 
+@app.cell
+def _(mo):
+    """Section header for Galileo embeddings."""
+    mo.md(
+        """
+    ---
+    ## 🧠 Galileo Embedding Generation
+
+    This section loads a Galileo-compatible TIF from `data/exports/`,
+    runs it through the Galileo encoder to produce per-pixel embeddings,
+    visualises them (PCA + K-means), and lets you export the result as a
+    new GeoTIFF.
+    """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    """Scan data/exports/ and data/tifs/ for Galileo-compatible TIFs and let the user pick one or type a custom path."""
+    from pathlib import Path as _Path
+
+    _exports_dir = _Path("data/exports")
+    _tifs_dir = _Path("data/tifs")
+
+    # Collect all candidate TIFs
+    _found_tifs = {}
+    # Galileo exports (galileo_*.tif)
+    if _exports_dir.exists():
+        for _p in sorted(_exports_dir.glob("galileo_*.tif")):
+            _found_tifs[f"[exports] {_p.name}"] = str(_p)
+    # Training TIFs in data/tifs/
+    if _tifs_dir.exists():
+        for _p in sorted(_tifs_dir.glob("*.tif")):
+            _found_tifs[f"[tifs] {_p.name}"] = str(_p)
+
+    galileo_tif_selector = None
+    galileo_tif_custom_path = mo.ui.text(
+        label="Or enter a custom TIF path",
+        placeholder="e.g. data/exports/my_file.tif",
+    )
+    generate_embeddings_button = mo.ui.run_button(label="🧠 Generate Embeddings")
+
+    _ui_elements = []
+
+    if _found_tifs:
+        galileo_tif_selector = mo.ui.dropdown(
+            options=_found_tifs,
+            label="Select a TIF",
+        )
+        _ui_elements.append(
+            mo.md(f"Found **{len(_found_tifs)}** TIF(s) in `data/exports/` and `data/tifs/`.")
+        )
+        _ui_elements.append(galileo_tif_selector)
+    else:
+        _ui_elements.append(
+            mo.callout(
+                mo.md(
+                    "No TIFs found in `data/exports/` or `data/tifs/`. "
+                    "You can still enter a path manually below, or use the Copernicus workflow above to create one."
+                ),
+                kind="warn",
+            )
+        )
+
+    _ui_elements.append(galileo_tif_custom_path)
+    _ui_elements.append(generate_embeddings_button)
+
+    mo.output.replace(mo.vstack(_ui_elements))
+    return galileo_tif_selector, galileo_tif_custom_path, generate_embeddings_button
+
+
+@app.cell
+def _(galileo_tif_selector, galileo_tif_custom_path, generate_embeddings_button, mo):
+    """Generate Galileo embeddings from the selected TIF."""
+    import traceback as _traceback
+    from pathlib import Path as _Path
+
+    embedding_result = None
+    embeddings_arr = None
+    embeddings_flat_arr = None
+    embedding_labels = None
+    embeddings_pca = None
+    selected_galileo_tif_path = None
+
+    if generate_embeddings_button is not None and generate_embeddings_button.value:
+        # Resolve which TIF to use: custom path takes priority over dropdown
+        _custom = (
+            galileo_tif_custom_path.value.strip() if galileo_tif_custom_path is not None else ""
+        )
+        _dropdown = galileo_tif_selector.value if galileo_tif_selector is not None else None
+
+        if _custom:
+            selected_galileo_tif_path = _Path(_custom)
+        elif _dropdown:
+            selected_galileo_tif_path = _Path(_dropdown)
+
+        if selected_galileo_tif_path is None or not selected_galileo_tif_path.exists():
+            embedding_result = f"""
+            ❌ **TIF not found**
+
+            Path: `{selected_galileo_tif_path}`
+
+            Select a TIF from the dropdown or enter a valid path.
+            """
+        else:
+            with mo.status.spinner(
+                title="Loading Galileo model and generating embeddings..."
+            ) as _spinner:
+                try:
+                    import numpy as _np
+                    import torch as _torch
+                    from einops import rearrange as _rearrange
+                    from sklearn.cluster import KMeans as _KMeans
+                    from sklearn.decomposition import PCA as _PCA
+                    from tqdm import tqdm as _tqdm
+
+                    from src.data.config import NORMALIZATION_DICT_FILENAME as _NORM_FILENAME
+                    from src.data.dataset import Dataset as _Dataset
+                    from src.data.dataset import Normalizer as _Normalizer
+                    from src.galileo import Encoder as _Encoder
+                    from src.masking import MaskedOutput as _MaskedOutput
+                    from src.utils import config_dir as _config_dir
+
+                    _DATA_FOLDER = _Path("data")
+
+                    # --- Load & normalise the TIF ---
+                    _spinner.update(title="Loading and normalising TIF...")
+                    _normalizing_dict = _Dataset.load_normalization_values(
+                        path=_config_dir / _NORM_FILENAME
+                    )
+                    _normalizer = _Normalizer(std=True, normalizing_dicts=_normalizing_dict)
+                    _dataset_output = _Dataset._tif_to_array(selected_galileo_tif_path).normalize(
+                        _normalizer
+                    )
+
+                    # --- Load model ---
+                    _spinner.update(title="Loading Galileo nano encoder...")
+                    _model = _Encoder.load_from_folder(_DATA_FOLDER / "models/nano")
+                    _model.eval()
+
+                    # --- Generate embeddings ---
+                    _spinner.update(title="Generating embeddings (this may take a while)...")
+                    _device = _torch.device("cpu")
+                    _output_list = []
+                    _batch_count = 0
+                    for i in _tqdm(
+                        _dataset_output.in_pixel_batches(batch_size=128, window_size=1)
+                    ):
+                        _batch_count += 1
+                        _masked = _MaskedOutput.from_datasetoutput(i, device=_device)
+                        with _torch.no_grad():
+                            _model_out = _model(
+                                _masked.space_time_x.float(),
+                                _masked.space_x.float(),
+                                _masked.time_x.float(),
+                                _masked.static_x.float(),
+                                _masked.space_time_mask,
+                                _masked.space_mask,
+                                _torch.ones_like(_masked.time_mask),
+                                _torch.ones_like(_masked.static_mask),
+                                _masked.months.long(),
+                                patch_size=1,
+                            )
+                            _output_list.append(
+                                _model.average_tokens(*_model_out[:-1]).cpu().numpy()
+                            )
+
+                    _all = _np.concatenate(_output_list, axis=0)
+                    _h_b = _dataset_output.space_time_x.shape[0]
+                    _w_b = _dataset_output.space_time_x.shape[1]
+                    embeddings_arr = _rearrange(_all, "(h w) d -> h w d", h=_h_b, w=_w_b)
+                    embeddings_flat_arr = _rearrange(embeddings_arr, "h w d -> (h w) d")
+
+                    # --- K-means ---
+                    _spinner.update(title="Clustering embeddings (K-means)...")
+                    _kmeans = _KMeans(n_clusters=3)
+                    _labels_flat = _kmeans.fit_predict(embeddings_flat_arr)
+                    embedding_labels = _rearrange(
+                        _labels_flat,
+                        "(h w) -> h w",
+                        h=embeddings_arr.shape[0],
+                        w=embeddings_arr.shape[1],
+                    )
+
+                    # --- PCA ---
+                    _spinner.update(title="Reducing dimensions (PCA)...")
+                    _pca = _PCA(n_components=3)
+                    _pca_flat = _pca.fit_transform(embeddings_flat_arr)
+                    embeddings_pca = _rearrange(
+                        _pca_flat,
+                        "(h w) d -> h w d",
+                        h=embeddings_arr.shape[0],
+                        w=embeddings_arr.shape[1],
+                    )
+
+                    embedding_result = f"""
+                    ✅ **Embeddings generated!**
+
+                    - Shape: `{embeddings_arr.shape}` (H × W × D)
+                    - Pixels: {embeddings_flat_arr.shape[0]:,}
+                    - Embedding dim: {embeddings_flat_arr.shape[1]}
+                    - PCA explained variance: {_pca.explained_variance_ratio_.sum():.1%}
+                    """
+
+                except Exception as e:
+                    embedding_result = f"""
+                    ❌ **Embedding generation failed**
+
+                    {str(e)}
+
+                    Make sure the Galileo model is available at `data/models/nano/`
+                    and all dependencies are installed (torch, einops, sklearn).
+                    """
+                    print("Embedding error:")
+                    print(_traceback.format_exc())
+
+    mo.output.replace(mo.md(embedding_result)) if embedding_result else None
+    return (
+        embeddings_arr,
+        embeddings_flat_arr,
+        embedding_labels,
+        embeddings_pca,
+        selected_galileo_tif_path,
+    )
+
+
+@app.cell
+def _(embedding_labels, embeddings_pca, mo):
+    """Visualise embeddings: K-means clusters and PCA RGB."""
+    if embeddings_pca is not None and embedding_labels is not None:
+        import matplotlib.pyplot as _plt
+
+        _fig, _axes = _plt.subplots(1, 2, figsize=(12, 5))
+
+        # K-means
+        _axes[0].imshow(embedding_labels, cmap="tab10")
+        _axes[0].set_title("K-means Clustering (3 clusters)")
+
+        # PCA as RGB
+        _pca_norm = (embeddings_pca - embeddings_pca.min()) / (
+            embeddings_pca.max() - embeddings_pca.min() + 1e-10
+        )
+        _axes[1].imshow(_pca_norm)
+        _axes[1].set_title("PCA-reduced Embeddings (RGB)")
+
+        _plt.tight_layout()
+        mo.output.replace(mo.vstack([_fig]))
+    return
+
+
+@app.cell
+def _(embeddings_arr, mo, selected_galileo_tif_path):
+    """Show export button for embedding GeoTIFF."""
+    export_embeddings_button = None
+
+    if embeddings_arr is not None:
+        export_embeddings_button = mo.ui.run_button(label="💾 Export Embeddings as GeoTIFF")
+        mo.output.replace(
+            mo.vstack(
+                [
+                    mo.md(
+                        f"Embeddings ready: `{embeddings_arr.shape[0]}×{embeddings_arr.shape[1]}` pixels, "
+                        f"`{embeddings_arr.shape[2]}` dimensions."
+                    ),
+                    export_embeddings_button,
+                ]
+            )
+        )
+    return (export_embeddings_button,)
+
+
+@app.cell
+def _(
+    embeddings_arr,
+    export_embeddings_button,
+    mo,
+    selected_galileo_tif_path,
+):
+    """Export embeddings to GeoTIFF when button is clicked."""
+    if (
+        export_embeddings_button is not None
+        and export_embeddings_button.value
+        and embeddings_arr is not None
+    ):
+        try:
+            from pathlib import Path as _Path
+
+            from src.data.copernicus.galileo_adapter import embeddings_to_geotiff
+
+            _src_name = (
+                selected_galileo_tif_path.stem if selected_galileo_tif_path else "embeddings"
+            )
+            _out_path = _Path("data/exports") / f"{_src_name}_embeddings.tif"
+
+            _result = embeddings_to_geotiff(
+                embeddings=embeddings_arr,
+                output_path=_out_path,
+                source_tif_path=selected_galileo_tif_path,
+            )
+
+            mo.output.replace(
+                mo.md(
+                    f"""
+                    ✅ **Embedding GeoTIFF exported!**
+
+                    Saved to: `{_result}`
+
+                    - Bands: {embeddings_arr.shape[2]} (one per embedding dimension)
+                    - Size: {embeddings_arr.shape[1]}×{embeddings_arr.shape[0]} pixels
+                    - CRS and transform copied from source TIF
+                    """
+                )
+            )
+        except Exception as e:
+            import traceback as _traceback
+
+            mo.output.replace(
+                mo.md(
+                    f"""
+                    ❌ **Export failed**
+
+                    {str(e)}
+                    """
+                )
+            )
+            print("Embedding export error:")
+            print(_traceback.format_exc())
+    return
+
+
 if __name__ == "__main__":
     app.run()
