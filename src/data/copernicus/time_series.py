@@ -123,14 +123,16 @@ def create_time_series_tif(
 ) -> Path:
     """Stack multiple S1/S2 acquisitions into single multi-band TIF.
 
-    This creates a Galileo-compatible time series TIF with the following structure:
-    - Bands 1-12: S2 bands for date 1
-    - Bands 13-14: S1 bands for date 1
-    - Bands 15-26: S2 bands for date 2
-    - Bands 27-28: S1 bands for date 2
+    This creates a time series TIF with the following structure (Galileo-compatible ordering):
+    - Bands 1-2: S1 bands for date 1 (VV, VH)
+    - Bands 3-14: S2 bands for date 1 (B1-B12)
+    - Bands 15-16: S1 bands for date 2 (VV, VH)
+    - Bands 17-28: S2 bands for date 2 (B1-B12)
     - ... and so on
 
-    Total bands: (12 + 2) × num_dates = 14 × num_dates
+    Total bands: (2 + 12) × num_dates = 14 × num_dates
+
+    Note: This ordering matches Galileo's expectation where S1 comes before S2.
 
     Args:
         s2_files: List of S2 zip files (one per date)
@@ -193,8 +195,9 @@ def create_time_series_tif(
 
             s1_data["bands_array"] = s1_aligned
 
-        # Concatenate S2 and S1: (H, W, 12) + (H, W, 2) = (H, W, 14)
-        combined = np.concatenate([s2_data["bands_array"], s1_data["bands_array"]], axis=-1)
+        # Concatenate S1 and S2: (H, W, 2) + (H, W, 12) = (H, W, 14)
+        # Order matches Galileo expectation: [S1_VV, S1_VH, S2_B1, ..., S2_B12]
+        combined = np.concatenate([s1_data["bands_array"], s2_data["bands_array"]], axis=-1)
 
         all_bands.append(combined)
         all_bounds.append(s2_data["bounds_wgs84"])

@@ -248,7 +248,7 @@ def _(datetime, mo, timedelta):
     """Create search parameter input widgets.
 
     Default values:
-    - Location: Small area in Luxembourg (6.15-6.16°E, 49.11-49.12°N)
+    - Location: Bloemhof Dam area, South Africa (25.68-25.69°E, -27.67--27.66°S)
     - Date range: Last 30 days
     - Satellite: Sentinel-2 (optical)
     - Max products: 2 (to keep download size manageable)
@@ -264,28 +264,28 @@ def _(datetime, mo, timedelta):
         start=-180,
         stop=180,
         step=0.01,
-        value=6.15,
+        value=25.6796,
         label="Min Longitude (°E)",
     )
     min_lat = mo.ui.number(
         start=-90,
         stop=90,
         step=0.01,
-        value=49.11,
+        value=-27.6721,
         label="Min Latitude (°N)",
     )
     max_lon = mo.ui.number(
         start=-180,
         stop=180,
         step=0.01,
-        value=6.16,
+        value=25.6897,
         label="Max Longitude (°E)",
     )
     max_lat = mo.ui.number(
         start=-90,
         stop=90,
         step=0.01,
-        value=49.12,
+        value=-27.663,
         label="Max Latitude (°N)",
     )
 
@@ -1441,9 +1441,9 @@ def _(
                         **Export Current Image**: Exports the currently displayed S2 image as RGB.
                         Good for visualization and sharing.
 
-                        **Export Time Series for Galileo**: Exports ALL S2 and S1 images with ALL spectral bands
-                        (12 S2 bands + 2 S1 bands per date) stacked into a single multi-band GeoTIFF.
-                        Compatible with Galileo model (Phase 1: S1+S2 only, missing ERA5/SRTM/etc).
+                        **Export Time Series for Galileo**: Exports ALL S2 and S1 images with the correct
+                        band layout for Galileo's `_tif_to_array()`. Drops S2 B1/B9, adds zero-filled
+                        placeholder bands for missing data (ERA5, SRTM, etc).
                         """
                     ),
                     mo.hstack([export_button, export_time_series_button], justify="start"),
@@ -1615,35 +1615,56 @@ def _(
                         Please download more products by increasing "Max Products" in the search parameters.
                         """
                     else:
-                        # Create time series TIF
-                        _result_path = create_time_series_tif(
+                        # Step 1: Create raw Copernicus time series TIF
+                        _raw_path = create_time_series_tif(
                             s2_files=downloaded_files["s2"],
                             s1_files=downloaded_files["s1"],
                             dates=_dates,
                             bbox=_bbox,
                             output_path=_output_path,
-                            normalize=True,
+                            normalize=False,  # Keep raw values for Galileo normalization
                         )
+
+                        _spinner.update(title="Converting to Galileo-compatible format...")
+
+                        # Step 2: Convert to Galileo format
+                        from src.data.copernicus.galileo_adapter import copernicus_to_galileo_tif
+
+                        _galileo_name = (
+                            f"galileo_S1_S2_dates={start_date.value}_{end_date.value}.tif"
+                        )
+                        _galileo_path = Path("data/exports") / _galileo_name
+
+                        _result_path = copernicus_to_galileo_tif(
+                            copernicus_tif_path=_raw_path,
+                            output_path=_galileo_path,
+                            dates=_dates,
+                            fill_missing_with_zeros=True,
+                        )
+
+                        _galileo_bands = (18 * len(_dates)) + 16 + 1
 
                         # Success message
                         export_result = f"""
-                        ✅ **Time Series Export Successful!**
+                        ✅ **Galileo-Compatible Export Successful!**
 
-                        File saved to: `{_result_path}`
+                        Galileo TIF: `{_result_path}`
+                        Raw TIF: `{_raw_path}`
 
-                        **Details:**
+                        **Galileo format details:**
                         - Dates: {len(_dates)} timesteps
-                        - Total bands: {14 * len(_dates)} (14 bands × {len(_dates)} dates)
-                        - Format: Float64, normalized [0, 1]
-                        - S2 bands: 12 per date (B01-B12)
-                        - S1 bands: 2 per date (VV, VH)
+                        - Total bands: {_galileo_bands} (18×{len(_dates)} dynamic + 16 space + 1 static)
+                        - S1 bands: VV, VH (2 per timestep)
+                        - S2 bands: B2-B8, B8A, B11, B12 (10 per timestep, B1/B9 dropped)
+                        - Time bands: 6 per timestep (zero-filled: ERA5, TerraClimate, VIIRS)
+                        - Space bands: 16 (zero-filled: SRTM, DW, WC)
+                        - Static bands: 1 (zero-filled: LandScan)
 
-                        **Phase 1 Status:**
-                        ✅ S1 and S2 data included
-                        ❌ Missing: ERA5, SRTM, VIIRS, Dynamic World, WorldCereal, Landscan
-
-                        This TIF has ~3% of the bands Galileo expects (14 vs 449 per timestep).
-                        Test with Galileo to see if it can handle partial bands, or proceed to Phase 2.
+                        **Compatibility:**
+                        ✅ Band ordering matches Galileo's `_tif_to_array()`
+                        ✅ S2 B1/B9 removed (Galileo doesn't use them)
+                        ✅ Structure: `(18×t) + 16 + 1` bands
+                        ⚠️ Time/space/static bands are zero-filled (missing source data)
                         """
 
         except Exception as e:
