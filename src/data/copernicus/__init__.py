@@ -8,6 +8,12 @@ from .band_recipes import (
 )
 from .client import CopernicusClient
 from .enums import S1AcquisitionMode, S1Polarization, S1ProductType, S2Band
+from .galileo_adapter import (
+    copernicus_to_galileo_tif,
+    embeddings_to_geotiff,
+    get_band_info,
+    validate_galileo_tif,
+)
 from .image_processing import (
     create_false_color_composite,
     crop_to_bbox,
@@ -44,6 +50,11 @@ __all__ = [
     "S1ProductType",
     "S1Polarization",
     "S1AcquisitionMode",
+    # Galileo integration
+    "copernicus_to_galileo_tif",
+    "embeddings_to_geotiff",
+    "validate_galileo_tif",
+    "get_band_info",
     # Band recipes
     "get_available_recipes",
     "get_recipe_names",

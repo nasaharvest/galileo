@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.18.4"
-app = marimo.App(width="medium", auto_download=["ipynb"])
+app = marimo.App(width="medium")
 
 
 @app.cell
@@ -96,9 +96,17 @@ def load_data(
     print("✅ Normalizer created successfully")
 
     print("🔄 Loading TIF file...")
-    tif_path = Path(
-        "data/tifs/min_lat=-27.6721_min_lon=25.6796_max_lat=-27.663_max_lon=25.6897_dates=2022-01-01_2023-12-31.tif"
-    )
+
+    # Try Galileo-compatible Copernicus export first, fall back to training TIF
+    galileo_exports = sorted(Path("data/exports").glob("galileo_S1_S2_dates=*.tif"))
+    if galileo_exports:
+        tif_path = galileo_exports[-1]  # Use the most recent export
+        print(f"📡 Found Copernicus Galileo export: {tif_path.name}")
+    else:
+        tif_path = Path(
+            "data/tifs/min_lat=-27.6721_min_lon=25.6796_max_lat=-27.663_max_lon=25.6897_dates=2022-01-01_2023-12-31.tif"
+        )
+        print(f"📁 Using training TIF: {tif_path.name}")
     print(f"📁 TIF path: {tif_path}")
     print(f"📊 TIF exists: {tif_path.exists()}")
 
