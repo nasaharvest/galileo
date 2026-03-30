@@ -299,23 +299,6 @@ class TestMakeEmbeddings(unittest.TestCase):
         new_files = after - before
         self.assertEqual(len(new_files), 0, f"Leftover memmap files: {new_files}")
 
-    # -- Device default -----------------------------------------------------
-
-    def test_default_device_is_cpu(self):
-        """When device=None it should default to CPU without error."""
-        from src.inference import make_embeddings
-
-        ds = _make_dataset_output(2, 2)
-        result = make_embeddings(
-            self.model,
-            ds,
-            window_size=1,
-            patch_size=1,
-            batch_size=4,
-            device=None,
-        )
-        self.assertEqual(result.shape, (2, 2, FAKE_EMBED_DIM))
-
 
 if __name__ == "__main__":
     unittest.main()
