@@ -1792,18 +1792,15 @@ def _(galileo_tif_selector, galileo_tif_custom_path, generate_embeddings_button,
                 title="Loading Galileo model and generating embeddings..."
             ) as _spinner:
                 try:
-                    import numpy as _np
                     import torch as _torch
                     from einops import rearrange as _rearrange
                     from sklearn.cluster import KMeans as _KMeans
                     from sklearn.decomposition import PCA as _PCA
-                    from tqdm import tqdm as _tqdm
 
                     from src.data.config import NORMALIZATION_DICT_FILENAME as _NORM_FILENAME
                     from src.data.dataset import Dataset as _Dataset
                     from src.data.dataset import Normalizer as _Normalizer
                     from src.galileo import Encoder as _Encoder
-                    from src.masking import MaskedOutput as _MaskedOutput
                     from src.utils import config_dir as _config_dir
 
                     _DATA_FOLDER = _Path("data")
@@ -1823,37 +1820,19 @@ def _(galileo_tif_selector, galileo_tif_custom_path, generate_embeddings_button,
                     _model = _Encoder.load_from_folder(_DATA_FOLDER / "models/nano")
                     _model.eval()
 
-                    # --- Generate embeddings ---
-                    _spinner.update(title="Generating embeddings (this may take a while)...")
-                    _device = _torch.device("cpu")
-                    _output_list = []
-                    _batch_count = 0
-                    for i in _tqdm(
-                        _dataset_output.in_pixel_batches(batch_size=128, window_size=1)
-                    ):
-                        _batch_count += 1
-                        _masked = _MaskedOutput.from_datasetoutput(i, device=_device)
-                        with _torch.no_grad():
-                            _model_out = _model(
-                                _masked.space_time_x.float(),
-                                _masked.space_x.float(),
-                                _masked.time_x.float(),
-                                _masked.static_x.float(),
-                                _masked.space_time_mask,
-                                _masked.space_mask,
-                                _torch.ones_like(_masked.time_mask),
-                                _torch.ones_like(_masked.static_mask),
-                                _masked.months.long(),
-                                patch_size=1,
-                            )
-                            _output_list.append(
-                                _model.average_tokens(*_model_out[:-1]).cpu().numpy()
-                            )
+                    # --- Generate embeddings (memory-efficient via memmap) ---
+                    _spinner.update(title="Generating embeddings (memory-efficient memmap)...")
+                    from src.inference import make_embeddings as _make_embeddings
 
-                    _all = _np.concatenate(_output_list, axis=0)
-                    _h_b = _dataset_output.space_time_x.shape[0]
-                    _w_b = _dataset_output.space_time_x.shape[1]
-                    embeddings_arr = _rearrange(_all, "(h w) d -> h w d", h=_h_b, w=_w_b)
+                    _device = _torch.device("cpu")
+                    embeddings_arr = _make_embeddings(
+                        model=_model,
+                        datasetoutput=_dataset_output,
+                        window_size=1,
+                        patch_size=1,
+                        batch_size=128,
+                        device=_device,
+                    )
                     embeddings_flat_arr = _rearrange(embeddings_arr, "h w d -> (h w) d")
 
                     # --- K-means ---
