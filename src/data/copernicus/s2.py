@@ -320,10 +320,10 @@ def _create_product_metadata(
     product_id: str = product.get("Id", f"unknown_{index}")
     product_name: str = product.get("Name", f"S2_product_{index}")
 
-    # Create a safe filename by sanitizing the product name
-    # Add resolution and metadata suffix to make purpose clear
+    # Create a safe filename with product ID embedded for deduplication
+    # Format: {product_id}__{safe_name}_R{resolution}m_metadata.json
     safe_name: str = sanitize_filename(product_name)
-    filename: str = f"{safe_name}_R{resolution}m_metadata.json"
+    filename: str = f"{product_id}__{safe_name}_R{resolution}m_metadata.json"
 
     # Determine file path within the cache directory
     # Use s2/ subdirectory to organize by satellite type
@@ -393,9 +393,10 @@ def _download_s2_product(
     product_name: str = product.get("Name", f"S2_product_{index}")
     content_length: int = product.get("ContentLength", 0)
 
-    # Create safe filename
+    # Create safe filename with product ID embedded for deduplication
+    # Format: {product_id}__{safe_name}_R{resolution}m.zip
     safe_name: str = sanitize_filename(product_name)
-    filename: str = f"{safe_name}_R{resolution}m.zip"
+    filename: str = f"{product_id}__{safe_name}_R{resolution}m.zip"
 
     # Determine file path within cache directory
     file_path: Path = client.cache_dir / "s2" / filename

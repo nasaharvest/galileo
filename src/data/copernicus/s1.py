@@ -494,10 +494,10 @@ def _create_product_metadata(
     product_id: str = product.get("Id", f"unknown_{index}")
     product_name: str = product.get("Name", f"S1_product_{index}")
 
-    # Create a safe filename by sanitizing the product name
-    # Add metadata suffix to make purpose clear
+    # Create a safe filename with product ID embedded for deduplication
+    # Format: {product_id}__{safe_name}_metadata.json
     safe_name: str = sanitize_filename(product_name)
-    filename: str = f"{safe_name}_metadata.json"
+    filename: str = f"{product_id}__{safe_name}_metadata.json"
 
     # Determine file path within the cache directory
     # Use s1/ subdirectory to organize by satellite type
@@ -590,10 +590,10 @@ def _download_s1_product(
     product_name: str = product.get("Name", f"S1_product_{index}")
     content_length: int = product.get("ContentLength", 0)  # File size in bytes
 
-    # Create safe filename for filesystem storage
-    # Remove characters that are invalid on Windows/macOS/Linux
+    # Create safe filename with product ID embedded for deduplication
+    # Format: {product_id}__{safe_name}.zip
     safe_name: str = sanitize_filename(product_name)
-    filename: str = f"{safe_name}.zip"  # S1 products are distributed as ZIP files
+    filename: str = f"{product_id}__{safe_name}.zip"
 
     # Determine file path within cache directory
     # Organize by satellite type: s1/ for Sentinel-1, s2/ for Sentinel-2
