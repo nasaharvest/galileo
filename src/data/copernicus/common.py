@@ -2,14 +2,75 @@
 
 This module contains common logic used by both S1 and S2 fetching modules,
 reducing code duplication and providing a consistent interface.
+
+Product-level deduplication:
+    Files are named with the Copernicus product ID embedded: {product_id}__{safe_name}.ext
+    This allows us to detect already-downloaded products regardless of which query found them.
+    Two different bboxes that return the same Copernicus tile will share the download.
 """
 
 import json
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 if TYPE_CHECKING:
     from .client import CopernicusClient
+
+
+def find_product_on_disk(
+    cache_dir: Path,
+    satellite_subdir: str,
+    product_id: str,
+) -> Optional[Path]:
+    """Check if a Copernicus product is already downloaded by scanning filenames for its ID.
+
+    Files are named as {product_id}__{safe_name}.ext, so we glob for {product_id}__*
+    to find any existing download regardless of which query originally fetched it.
+
+    Args:
+        cache_dir: Root cache directory (e.g. data/cache/copernicus)
+        satellite_subdir: Subdirectory for the satellite type ("s1" or "s2")
+        product_id: Copernicus product UUID (e.g. "a8dd0899-7a3b-4e4b-9b3a-5e7f1234abcd")
+
+    Returns:
+        Path to the existing file if found and non-empty, None otherwise
+    """
+    subdir = cache_dir / satellite_subdir
+    if not subdir.exists():
+        return None
+
+    matches = list(subdir.glob(f"{product_id}__*"))
+    for match in matches:
+        if match.exists() and match.stat().st_size > 0:
+            # For zip files, verify the archive isn't truncated/corrupted
+            if match.suffix == ".zip" and not _is_valid_zip(match):
+                print(f"⚠️  Corrupted zip detected, removing: {match.name}")
+                match.unlink()
+                continue
+            return match
+    return None
+
+
+def _is_valid_zip(path: Path) -> bool:
+    """Quick integrity check for a zip file.
+
+    Reads the central directory (at the end of the file) and runs CRC checks
+    on all entries. A truncated download will fail here because the central
+    directory is written last.
+
+    Args:
+        path: Path to the zip file
+
+    Returns:
+        True if the zip is structurally valid, False otherwise
+    """
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            bad = zf.testzip()
+            return bad is None
+    except (zipfile.BadZipFile, OSError):
+        return False
 
 
 def check_cache(
@@ -143,6 +204,10 @@ def process_products(
 ) -> List[Path]:
     """Process products by downloading or creating metadata.
 
+    Uses product-level deduplication: before downloading, checks if the product
+    (identified by its Copernicus UUID) already exists on disk from a previous
+    query. This prevents re-downloading the same tile when the bbox shifts slightly.
+
     Args:
         client: CopernicusClient instance
         products: List of products to process
@@ -156,12 +221,25 @@ def process_products(
         List of paths to downloaded/created files
     """
     downloaded_paths: List[Path] = []
+    sat_subdir = "s1" if "1" in satellite else "s2"
+    skipped = 0
 
     if download_data:
         print(f"\n📥 DOWNLOADING {satellite} IMAGERY")
         print("=" * 45)
 
         for i, product in enumerate(products, 1):
+            product_id = product.get("Id", "")
+
+            # Product-level dedup: check if this product ID is already on disk
+            if product_id:
+                existing = find_product_on_disk(client.cache_dir, sat_subdir, product_id)
+                if existing:
+                    print(f"\n⏭️  Product {i}/{len(products)} already on disk: {existing.name}")
+                    downloaded_paths.append(existing)
+                    skipped += 1
+                    continue
+
             print(f"\n🛰️ Downloading product {i}/{len(products)}")
 
             downloaded_file = download_func(client, product, i - 1, **kwargs)
@@ -175,8 +253,22 @@ def process_products(
         print("=" * 35)
 
         for i, product in enumerate(products):
+            product_id = product.get("Id", "")
+
+            # Product-level dedup for metadata files too
+            if product_id:
+                existing = find_product_on_disk(client.cache_dir, sat_subdir, product_id)
+                if existing:
+                    print(f"⏭️  Metadata for product already on disk: {existing.name}")
+                    downloaded_paths.append(existing)
+                    skipped += 1
+                    continue
+
             metadata_file = metadata_func(client, product, i, **kwargs)
             if metadata_file:
                 downloaded_paths.append(metadata_file)
+
+    if skipped:
+        print(f"\n🎯 Skipped {skipped}/{len(products)} products (already downloaded)")
 
     return downloaded_paths
