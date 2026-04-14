@@ -31,7 +31,12 @@ from .indices import (
     calculate_ndwi,
     calculate_savi,
 )
-from .quality import apply_cloud_mask_to_image, extract_cloud_mask
+from .quality import (
+    apply_cloud_mask_to_image,
+    assess_s1_quality,
+    extract_cloud_mask,
+    quality_gate,
+)
 from .utils import create_validated_bbox, find_granule_directory
 from .visualization import (
     create_band_analysis_plot,
@@ -72,6 +77,8 @@ __all__ = [
     # Quality control
     "extract_cloud_mask",
     "apply_cloud_mask_to_image",
+    "assess_s1_quality",
+    "quality_gate",
     # Spectral indices
     "calculate_ndvi",
     "calculate_ndwi",

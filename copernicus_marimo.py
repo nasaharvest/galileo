@@ -320,6 +320,17 @@ def _(datetime, mo, timedelta):
         label="Crop to target area only (faster, less memory)",
     )
 
+    # Quality threshold slider — shared by S1 and S2
+    # Controls the minimum usable-pixel % to ACCEPT a tile
+    quality_threshold = mo.ui.slider(
+        start=50,
+        stop=100,
+        step=1,
+        value=90,
+        label="Quality threshold (% usable pixels to accept)",
+        show_value=True,
+    )
+
     # Search button triggers the search and download
     search_button = mo.ui.run_button(label="🔍 Search & Download")
 
@@ -331,6 +342,7 @@ def _(datetime, mo, timedelta):
         max_products,
         min_lat,
         min_lon,
+        quality_threshold,
         satellite_type,
         search_button,
         start_date,
@@ -347,6 +359,7 @@ def _(
     min_lat,
     min_lon,
     mo,
+    quality_threshold,
     satellite_type,
     search_button,
     start_date,
@@ -377,6 +390,13 @@ def _(
                 """
             ),
             crop_to_bbox,
+            mo.md(
+                """
+                **Quality Gate**: Minimum % of usable pixels to accept a tile.
+                Tiles below (threshold − 10%) are rejected; in between is marginal.
+                """
+            ),
+            quality_threshold,
             mo.callout(
                 mo.md(
                     """
@@ -707,6 +727,7 @@ def _(
     min_lat,
     min_lon,
     mo,
+    quality_threshold,
     satellite_type,
 ):
     """Create time slider and pre-process all images for fast rendering.
@@ -714,7 +735,8 @@ def _(
     This cell:
     1. Extracts dates from filenames and creates metadata
     2. Pre-processes ALL images into memory (cached)
-    3. Creates slider widget for navigation
+    3. Runs quality assessment (S1: invalid pixels / border noise, S2: cloud mask)
+    4. Creates slider widget for navigation
 
     Pre-processing happens once, making slider interactions instant.
     The crop_to_bbox option controls whether to show full context or just target area.
@@ -746,6 +768,9 @@ def _(
             # Get bbox for optional cropping
             _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
             _use_bbox = crop_to_bbox.value  # User's choice
+
+            # Import quality functions
+            from src.data.copernicus.quality import assess_s1_quality, quality_gate
 
             # Extract dates and pre-process images
             for _idx, _file_path in enumerate(_files_to_visualize):
@@ -787,6 +812,21 @@ def _(
                         _processed_data is not None
                         and _processed_data.get("bounds_wgs84") is not None
                     ):
+                        # --- Quality assessment ---
+                        _quality_report = None
+                        _quality_verdict = None
+
+                        if _viz_satellite_type == "S1":
+                            _spinner.update(
+                                title=f"Quality check {_idx + 1}/{len(_files_to_visualize)}..."
+                            )
+                            _quality_report = assess_s1_quality(_file_path)
+                            if _quality_report is not None:
+                                _quality_verdict = quality_gate(
+                                    _quality_report["usable_pct"],
+                                    threshold=quality_threshold.value,
+                                )
+
                         # Store metadata and cached image data
                         file_metadata.append(
                             {
@@ -794,6 +834,8 @@ def _(
                                 "date": _date_obj,
                                 "date_str": _date_display,
                                 "filename": _filename,
+                                "quality_report": _quality_report,
+                                "quality_verdict": _quality_verdict,
                             }
                         )
                         cached_images.append(_processed_data)
@@ -1059,6 +1101,7 @@ def _(
     min_lat,
     min_lon,
     mo,
+    quality_threshold,
     satellite_type,
     time_slider,
     traceback,
@@ -1352,10 +1395,30 @@ def _(
                 ax.set_xlabel("Longitude (°E)", fontsize=12)
                 ax.set_ylabel("Latitude (°N)", fontsize=12)
 
-                # Update title to show recipe name
+                # Update title to show recipe name and quality badge
                 _recipe_name = _selected_recipe if _selected_recipe else satellite_type.value
+
+                # Build quality badge string for S1 tiles
+                _quality_badge = ""
+                _qr = _metadata.get("quality_report")
+                if _qr is not None:
+                    from src.data.copernicus.quality import quality_gate as _qg
+
+                    _verdict = _qg(_qr["usable_pct"], threshold=quality_threshold.value)
+                    if _verdict == "ACCEPT":
+                        _quality_badge = f"  🟢 ACCEPT — {_qr['usable_pct']:.1f}% valid"
+                    elif _verdict == "MARGINAL":
+                        _quality_badge = f"  🟡 MARGINAL — {_qr['usable_pct']:.1f}% valid"
+                    else:
+                        _quality_badge = f"  🔴 REJECT — {_qr['usable_pct']:.1f}% valid"
+                    if _qr.get("border_noise_detected"):
+                        _quality_badge += "  ⚠️ border noise"
+                    if _qr.get("orbit_type"):
+                        _quality_badge += f"  | orbit: {_qr['orbit_type']}"
+
                 _title = (
-                    f"{_recipe_name} - {_metadata['date_str']}\n{_metadata['filename'][:50]}..."
+                    f"{_recipe_name} - {_metadata['date_str']}\n"
+                    f"{_metadata['filename'][:50]}...{_quality_badge}"
                 )
                 ax.set_title(_title, fontsize=11, fontweight="bold")
 
