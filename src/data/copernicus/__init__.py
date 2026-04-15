@@ -34,6 +34,7 @@ from .indices import (
 from .quality import (
     apply_cloud_mask_to_image,
     assess_s1_quality,
+    assess_s2_quality,
     extract_cloud_mask,
     quality_gate,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "extract_cloud_mask",
     "apply_cloud_mask_to_image",
     "assess_s1_quality",
+    "assess_s2_quality",
     "quality_gate",
     # Spectral indices
     "calculate_ndvi",

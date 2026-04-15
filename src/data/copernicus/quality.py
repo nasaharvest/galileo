@@ -167,6 +167,102 @@ def apply_cloud_mask_to_image(
 
 
 # ---------------------------------------------------------------------------
+# Sentinel-2 quality assessment (SCL-based)
+# ---------------------------------------------------------------------------
+
+
+def assess_s2_quality(zip_file_path: Path) -> Optional[Dict[str, Any]]:
+    """Assess quality of a Sentinel-2 L2A product using the SCL band.
+
+    Reads the Scene Classification Layer and counts pixels per category to
+    produce a detailed quality report.
+
+    SCL classes:
+        0  = No Data
+        1  = Saturated / defective
+        2  = Dark area (topographic shadow)
+        3  = Cloud shadow
+        4  = Vegetation  (USABLE)
+        5  = Bare soil   (USABLE)
+        6  = Water       (USABLE)
+        7  = Unclassified
+        8  = Cloud medium probability
+        9  = Cloud high probability
+        10 = Thin cirrus
+        11 = Snow / ice
+
+    Args:
+        zip_file_path: Path to a Sentinel-2 Level-2A ZIP file.
+
+    Returns:
+        Quality report dict, or None on failure::
+
+            {
+                "cloud_pct": 42.3,
+                "shadow_pct": 5.1,
+                "nodata_pct": 0.0,
+                "snow_pct": 0.0,
+                "usable_pct": 52.6,
+            }
+    """
+    try:
+        with extract_s2_safe_structure(zip_file_path) as (safe_dir, granule_dir):
+            if "MSIL1C" in safe_dir.name:
+                print(
+                    f"Warning: {zip_file_path.name} is Level-1C (no SCL band). "
+                    "Quality assessment requires Level-2A products."
+                )
+                return None
+
+            # Locate SCL band (same logic as extract_cloud_mask)
+            img_dir_20m = granule_dir / "IMG_DATA" / "R20m"
+            if not img_dir_20m.exists():
+                img_dir_20m = granule_dir / "IMG_DATA"
+
+            scl_file = None
+            for pattern in ("*_SCL_20m.jp2", "*_SCL.jp2", "*SCL*.jp2"):
+                matches = list(img_dir_20m.glob(pattern))
+                if matches:
+                    scl_file = matches[0]
+                    break
+
+            if scl_file is None:
+                print(f"SCL band not found in {zip_file_path.name}")
+                return None
+
+            with rasterio.open(scl_file) as src:
+                scl = src.read(1)
+
+            total = scl.size
+            if total == 0:
+                return None
+
+            def _pct(mask: np.ndarray) -> float:
+                return float(np.sum(mask) / total * 100.0)
+
+            nodata_pct = _pct(np.isin(scl, [0, 1]))  # No data + saturated
+            shadow_pct = _pct(np.isin(scl, [2, 3]))  # Dark area + cloud shadow
+            cloud_pct = _pct(np.isin(scl, [8, 9, 10]))  # Cloud med/high + cirrus
+            snow_pct = _pct(scl == 11)  # Snow / ice
+            usable_pct = _pct(np.isin(scl, [4, 5, 6]))  # Vegetation + bare + water
+
+            return {
+                "cloud_pct": round(cloud_pct, 2),
+                "shadow_pct": round(shadow_pct, 2),
+                "nodata_pct": round(nodata_pct, 2),
+                "snow_pct": round(snow_pct, 2),
+                "usable_pct": round(usable_pct, 2),
+            }
+
+    except Exception as e:
+        print(f"Error assessing S2 quality for {zip_file_path.name}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Sentinel-1 SAR quality assessment
 # ---------------------------------------------------------------------------
 
