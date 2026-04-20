@@ -898,6 +898,7 @@ def _(cached_images, file_metadata, mo):
     """Create quality threshold sliders (separate cell so they don't reset on interaction)."""
     s2_quality_threshold = None
     s1_quality_threshold = None
+    s2_nodata_threshold = None
 
     if cached_images and len(cached_images) > 0:
         # Check which satellite types are present
@@ -913,6 +914,14 @@ def _(cached_images, file_metadata, mo):
                 label="S2 min usable % (cloud/shadow filter)",
                 show_value=True,
             )
+            s2_nodata_threshold = mo.ui.slider(
+                start=0,
+                stop=100,
+                step=5,
+                value=20,
+                label="S2 max nodata % (data gap filter)",
+                show_value=True,
+            )
         if _has_s1:
             s1_quality_threshold = mo.ui.slider(
                 start=0,
@@ -923,7 +932,7 @@ def _(cached_images, file_metadata, mo):
                 show_value=True,
             )
 
-    return (s1_quality_threshold, s2_quality_threshold)
+    return (s1_quality_threshold, s2_nodata_threshold, s2_quality_threshold)
 
 
 @app.cell
@@ -933,6 +942,7 @@ def _(
     file_metadata,
     mo,
     s1_quality_threshold,
+    s2_nodata_threshold,
     s2_quality_threshold,
     time_slider,
 ):
@@ -944,9 +954,10 @@ def _(
     filtered_indices = []
 
     if cached_images and len(cached_images) > 0:
-        # Compute filtered indices — each sat type uses its own threshold
+        # Compute filtered indices — each sat type uses its own thresholds
         _s2_thresh = s2_quality_threshold.value if s2_quality_threshold is not None else 0
         _s1_thresh = s1_quality_threshold.value if s1_quality_threshold is not None else 0
+        _s2_nodata_max = s2_nodata_threshold.value if s2_nodata_threshold is not None else 100
 
         for _i, _meta in enumerate(file_metadata):
             _qr = _meta.get("quality_report")
@@ -954,9 +965,15 @@ def _(
                 filtered_indices.append(_i)
                 continue
             _sat = _meta.get("sat_type", "S2")
-            _thresh = _s2_thresh if _sat == "S2" else _s1_thresh
-            if _qr["usable_pct"] >= _thresh:
-                filtered_indices.append(_i)
+            if _sat == "S2":
+                # S2: check usable % AND nodata %
+                _nodata_total = _qr.get("nodata_pct", 0) + _qr.get("defective_pct", 0)
+                if _qr["usable_pct"] >= _s2_thresh and _nodata_total <= _s2_nodata_max:
+                    filtered_indices.append(_i)
+            else:
+                # S1: check usable % only
+                if _qr["usable_pct"] >= _s1_thresh:
+                    filtered_indices.append(_i)
 
         _total = len(file_metadata)
         _kept = len(filtered_indices)
@@ -1005,6 +1022,8 @@ def _(
             _quality_controls = [mo.md("**Quality filter**")]
             if s2_quality_threshold is not None:
                 _quality_controls.append(s2_quality_threshold)
+            if s2_nodata_threshold is not None:
+                _quality_controls.append(s2_nodata_threshold)
             if s1_quality_threshold is not None:
                 _quality_controls.append(s1_quality_threshold)
             _quality_controls.append(_filter_summary)
@@ -1065,6 +1084,8 @@ def _(
             _quality_widgets = []
             if s2_quality_threshold is not None:
                 _quality_widgets.append(s2_quality_threshold)
+            if s2_nodata_threshold is not None:
+                _quality_widgets.append(s2_nodata_threshold)
             if s1_quality_threshold is not None:
                 _quality_widgets.append(s1_quality_threshold)
 
@@ -1168,6 +1189,7 @@ def _(
     min_lon,
     mo,
     s1_quality_threshold,
+    s2_nodata_threshold,
     s2_quality_threshold,
     satellite_type,
     time_slider,
@@ -1486,6 +1508,16 @@ def _(
                     from src.data.copernicus.quality import quality_gate as _qg
 
                     _verdict = _qg(_qr["usable_pct"], threshold=_threshold_val)
+
+                    # S2: also reject if nodata exceeds threshold
+                    if _current_sat == "S2":
+                        _nodata_max = (
+                            s2_nodata_threshold.value if s2_nodata_threshold is not None else 100
+                        )
+                        _nodata_total = _qr.get("nodata_pct", 0) + _qr.get("defective_pct", 0)
+                        if _nodata_total > _nodata_max and _verdict != "REJECT":
+                            _verdict = "REJECT"
+
                     _is_filtered_out = _selected_idx not in filtered_indices
                     if _verdict == "ACCEPT":
                         _quality_badge = f"  🟢 ACCEPT — {_qr['usable_pct']:.1f}% usable"
@@ -1499,6 +1531,13 @@ def _(
                         _quality_badge += (
                             f"  | ☁️ {_qr['cloud_pct']:.1f}%" f"  🌑 {_qr['shadow_pct']:.1f}%"
                         )
+                        _nodata_val = _qr.get("nodata_pct", 0)
+                        _defective_val = _qr.get("defective_pct", 0)
+                        if _nodata_val > 0 or _defective_val > 0:
+                            _quality_badge += (
+                                f"  ⬛ {_nodata_val:.1f}% nodata"
+                                f"  🔧 {_defective_val:.1f}% defective"
+                            )
                     # S1-specific details
                     if _qr.get("border_noise_detected"):
                         _quality_badge += "  ⚠️ border noise"

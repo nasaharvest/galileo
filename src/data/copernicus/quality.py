@@ -201,6 +201,7 @@ def assess_s2_quality(zip_file_path: Path) -> Optional[Dict[str, Any]]:
                 "cloud_pct": 42.3,
                 "shadow_pct": 5.1,
                 "nodata_pct": 0.0,
+                "defective_pct": 0.0,
                 "snow_pct": 0.0,
                 "usable_pct": 52.6,
             }
@@ -240,7 +241,8 @@ def assess_s2_quality(zip_file_path: Path) -> Optional[Dict[str, Any]]:
             def _pct(mask: np.ndarray) -> float:
                 return float(np.sum(mask) / total * 100.0)
 
-            nodata_pct = _pct(np.isin(scl, [0, 1]))  # No data + saturated
+            nodata_pct = _pct(scl == 0)  # No data (edge of orbit, missing strips)
+            defective_pct = _pct(scl == 1)  # Saturated / defective (sensor artifacts)
             shadow_pct = _pct(np.isin(scl, [2, 3]))  # Dark area + cloud shadow
             cloud_pct = _pct(np.isin(scl, [8, 9, 10]))  # Cloud med/high + cirrus
             snow_pct = _pct(scl == 11)  # Snow / ice
@@ -250,6 +252,7 @@ def assess_s2_quality(zip_file_path: Path) -> Optional[Dict[str, Any]]:
                 "cloud_pct": round(cloud_pct, 2),
                 "shadow_pct": round(shadow_pct, 2),
                 "nodata_pct": round(nodata_pct, 2),
+                "defective_pct": round(defective_pct, 2),
                 "snow_pct": round(snow_pct, 2),
                 "usable_pct": round(usable_pct, 2),
             }
