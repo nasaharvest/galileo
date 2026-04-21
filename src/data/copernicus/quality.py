@@ -1,11 +1,16 @@
-"""Quality control utilities for Copernicus Sentinel-2 satellite data.
+"""Quality control utilities for Copernicus Sentinel-1 and Sentinel-2 satellite data.
 
-This module provides functions for quality assessment and masking of Sentinel-2
-optical imagery, particularly cloud masking using the Scene Classification Layer (SCL).
+This module provides functions for quality assessment and masking of satellite imagery:
+- Sentinel-2: Cloud masking using the Scene Classification Layer (SCL)
+- Sentinel-1: Invalid pixel detection, border noise detection, orbit type extraction
+- Shared quality_gate() verdict function for both S1 and S2 reports
 """
 
+import tempfile
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import rasterio
@@ -159,3 +164,345 @@ def apply_cloud_mask_to_image(
         raise ValueError(f"Unsupported image dimensions: {image_array.ndim}")
 
     return masked_image
+
+
+# ---------------------------------------------------------------------------
+# Sentinel-2 quality assessment (SCL-based)
+# ---------------------------------------------------------------------------
+
+
+def assess_s2_quality(zip_file_path: Path) -> Optional[Dict[str, Any]]:
+    """Assess quality of a Sentinel-2 L2A product using the SCL band.
+
+    Reads the Scene Classification Layer and counts pixels per category to
+    produce a detailed quality report.
+
+    SCL classes:
+        0  = No Data
+        1  = Saturated / defective
+        2  = Dark area (topographic shadow)
+        3  = Cloud shadow
+        4  = Vegetation  (USABLE)
+        5  = Bare soil   (USABLE)
+        6  = Water       (USABLE)
+        7  = Unclassified
+        8  = Cloud medium probability
+        9  = Cloud high probability
+        10 = Thin cirrus
+        11 = Snow / ice
+
+    Args:
+        zip_file_path: Path to a Sentinel-2 Level-2A ZIP file.
+
+    Returns:
+        Quality report dict, or None on failure::
+
+            {
+                "cloud_pct": 42.3,
+                "shadow_pct": 5.1,
+                "nodata_pct": 0.0,
+                "defective_pct": 0.0,
+                "snow_pct": 0.0,
+                "usable_pct": 52.6,
+            }
+    """
+    try:
+        with extract_s2_safe_structure(zip_file_path) as (safe_dir, granule_dir):
+            if "MSIL1C" in safe_dir.name:
+                print(
+                    f"Warning: {zip_file_path.name} is Level-1C (no SCL band). "
+                    "Quality assessment requires Level-2A products."
+                )
+                return None
+
+            # Locate SCL band (same logic as extract_cloud_mask)
+            img_dir_20m = granule_dir / "IMG_DATA" / "R20m"
+            if not img_dir_20m.exists():
+                img_dir_20m = granule_dir / "IMG_DATA"
+
+            scl_file = None
+            for pattern in ("*_SCL_20m.jp2", "*_SCL.jp2", "*SCL*.jp2"):
+                matches = list(img_dir_20m.glob(pattern))
+                if matches:
+                    scl_file = matches[0]
+                    break
+
+            if scl_file is None:
+                print(f"SCL band not found in {zip_file_path.name}")
+                return None
+
+            with rasterio.open(scl_file) as src:
+                scl = src.read(1)
+
+            total = scl.size
+            if total == 0:
+                return None
+
+            def _pct(mask: np.ndarray) -> float:
+                return float(np.sum(mask) / total * 100.0)
+
+            nodata_pct = _pct(scl == 0)  # No data (edge of orbit, missing strips)
+            defective_pct = _pct(scl == 1)  # Saturated / defective (sensor artifacts)
+            shadow_pct = _pct(np.isin(scl, [2, 3]))  # Dark area + cloud shadow
+            cloud_pct = _pct(np.isin(scl, [8, 9, 10]))  # Cloud med/high + cirrus
+            snow_pct = _pct(scl == 11)  # Snow / ice
+            usable_pct = _pct(np.isin(scl, [4, 5, 6]))  # Vegetation + bare + water
+
+            return {
+                "cloud_pct": round(cloud_pct, 2),
+                "shadow_pct": round(shadow_pct, 2),
+                "nodata_pct": round(nodata_pct, 2),
+                "defective_pct": round(defective_pct, 2),
+                "snow_pct": round(snow_pct, 2),
+                "usable_pct": round(usable_pct, 2),
+            }
+
+    except Exception as e:
+        print(f"Error assessing S2 quality for {zip_file_path.name}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Sentinel-1 SAR quality assessment
+# ---------------------------------------------------------------------------
+
+
+def _count_invalid_pixels(band_data: np.ndarray) -> float:
+    """Count the percentage of invalid pixels in a SAR band.
+
+    Invalid pixels are: zero (no data received), NaN, or extreme outliers
+    (values beyond ±5 standard deviations from the mean of valid pixels).
+
+    Args:
+        band_data: 2-D array of SAR backscatter values (linear scale).
+
+    Returns:
+        Percentage of invalid pixels (0.0–100.0).
+    """
+    total = band_data.size
+    if total == 0:
+        return 100.0
+
+    # Zeros and NaNs
+    invalid_mask = np.isnan(band_data) | np.isinf(band_data) | (band_data == 0)
+
+    # Outlier detection on the valid subset
+    valid = band_data[~invalid_mask]
+    if valid.size > 0:
+        mean = valid.mean()
+        std = valid.std()
+        if std > 0:
+            outlier_mask = np.abs(band_data - mean) > 5 * std
+            invalid_mask = invalid_mask | outlier_mask
+
+    return float(np.sum(invalid_mask) / total * 100.0)
+
+
+def _detect_border_noise(
+    band_data: np.ndarray,
+    edge_pixels: int = 50,
+    zero_threshold: float = 0.9,
+) -> bool:
+    """Detect border noise in a SAR image.
+
+    S1 GRD products (especially pre-March 2018) have strips of noisy/zero
+    pixels along the swath edges.  We scan the first and last N columns/rows
+    and flag the tile if any edge is predominantly zero.
+
+    Args:
+        band_data: 2-D array of SAR backscatter values.
+        edge_pixels: Number of rows/columns to inspect at each edge.
+        zero_threshold: Fraction of near-zero pixels that triggers the flag.
+
+    Returns:
+        True if border noise is detected on any edge.
+    """
+    h, w = band_data.shape
+    edge_pixels = min(edge_pixels, h // 4, w // 4)  # Don't exceed quarter of image
+    if edge_pixels < 1:
+        return False
+
+    near_zero = 1e-10  # Threshold for "near-zero" in linear scale
+
+    edges = [
+        band_data[:edge_pixels, :],  # top rows
+        band_data[-edge_pixels:, :],  # bottom rows
+        band_data[:, :edge_pixels],  # left columns
+        band_data[:, -edge_pixels:],  # right columns
+    ]
+
+    for edge in edges:
+        zero_frac = np.sum(np.abs(edge) < near_zero) / edge.size
+        if zero_frac >= zero_threshold:
+            return True
+
+    return False
+
+
+def _extract_orbit_type(safe_dir: Path) -> Optional[str]:
+    """Extract orbit type (precise / restituted) from manifest.safe.
+
+    The manifest.safe XML inside the .SAFE directory contains a
+    ``<s1sarl1:orbitReference>`` element whose child
+    ``<safe:extension><s1sarl1:orbitProperties><s1sarl1:pass>`` or
+    ``<safe:orbitNumber>`` attributes indicate the orbit file used.
+    The key field is ``<s1sarl1:extension><s1sarl1:orbitProperties>``
+    with ``type`` attribute, but the most reliable indicator is the
+    ``metadataObject`` with ID ``measurementOrbitReference`` whose
+    ``xmlData`` contains the orbit file name.  Orbit file names
+    starting with ``AUX_POEORB`` = precise, ``AUX_RESORB`` = restituted.
+
+    Falls back to searching for the raw strings in the XML text.
+
+    Args:
+        safe_dir: Path to the extracted .SAFE directory.
+
+    Returns:
+        ``"precise"``, ``"restituted"``, or ``None`` if undetermined.
+    """
+    manifest = safe_dir / "manifest.safe"
+    if not manifest.exists():
+        return None
+
+    try:
+        content = manifest.read_text(errors="replace")
+
+        # Fast string search — orbit file references are embedded in the XML
+        if "AUX_POEORB" in content:
+            return "precise"
+        if "AUX_RESORB" in content:
+            return "restituted"
+
+        # Fallback: try XML parsing for less common layouts
+        tree = ET.parse(manifest)
+        root = tree.getroot()
+        xml_str = ET.tostring(root, encoding="unicode")
+        if "AUX_POEORB" in xml_str:
+            return "precise"
+        if "AUX_RESORB" in xml_str:
+            return "restituted"
+
+    except Exception as e:
+        print(f"Warning: could not parse orbit type from manifest.safe: {e}")
+
+    return None
+
+
+def assess_s1_quality(
+    zip_file_path: Path,
+    edge_pixels: int = 50,
+) -> Optional[Dict[str, Any]]:
+    """Assess quality of a Sentinel-1 GRD product.
+
+    Opens the ZIP, reads VV/VH TIFF bands, and computes:
+    - invalid_pixel_pct: percentage of zero / NaN / outlier pixels
+    - border_noise_detected: boolean flag for swath-edge noise
+    - orbit_type: "precise" or "restituted" (from manifest.safe)
+    - usable_pct: 100 - invalid_pixel_pct
+
+    Args:
+        zip_file_path: Path to a Sentinel-1 ZIP file (GRD product).
+        edge_pixels: Number of edge rows/cols to scan for border noise.
+
+    Returns:
+        Quality report dict, or None on failure::
+
+            {
+                "invalid_pixel_pct": 3.2,
+                "border_noise_detected": True,
+                "orbit_type": "precise",
+                "usable_pct": 96.8,
+            }
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+
+            with zipfile.ZipFile(zip_file_path, "r") as zf:
+                zf.extractall(tmp_path)
+
+            safe_dirs = list(tmp_path.glob("*.SAFE"))
+            if not safe_dirs:
+                print(f"No .SAFE directory in {zip_file_path.name}")
+                return None
+            safe_dir = safe_dirs[0]
+
+            # --- Read polarization TIFFs ---
+            measurement_dir = safe_dir / "measurement"
+            if not measurement_dir.exists():
+                print(f"No measurement/ directory in {zip_file_path.name}")
+                return None
+
+            tiff_files = list(measurement_dir.glob("*.tiff"))
+            if not tiff_files:
+                print(f"No TIFF files in {zip_file_path.name}")
+                return None
+
+            # Aggregate invalid-pixel stats across all polarisation bands
+            all_invalid_pcts: list[float] = []
+            border_noise = False
+
+            for tiff in tiff_files:
+                with rasterio.open(tiff) as src:
+                    data = src.read(1).astype(np.float32)
+
+                all_invalid_pcts.append(_count_invalid_pixels(data))
+
+                if not border_noise:
+                    border_noise = _detect_border_noise(data, edge_pixels=edge_pixels)
+
+            invalid_pct = float(np.mean(all_invalid_pcts)) if all_invalid_pcts else 100.0
+
+            # --- Orbit type ---
+            orbit_type = _extract_orbit_type(safe_dir)
+
+            return {
+                "invalid_pixel_pct": round(invalid_pct, 2),
+                "border_noise_detected": border_noise,
+                "orbit_type": orbit_type,
+                "usable_pct": round(100.0 - invalid_pct, 2),
+            }
+
+    except Exception as e:
+        print(f"Error assessing S1 quality for {zip_file_path.name}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Shared quality gate (works for both S1 and S2 reports)
+# ---------------------------------------------------------------------------
+
+
+def quality_gate(
+    usable_pct: float,
+    threshold: float = 90.0,
+    marginal_offset: float = 10.0,
+) -> str:
+    """Return a quality verdict based on usable pixel percentage.
+
+    The same function is used for both S2 (cloud-free %) and S1 (valid pixel %).
+
+    Verdicts:
+    - ``"ACCEPT"``   — usable_pct >= threshold
+    - ``"MARGINAL"`` — usable_pct >= threshold - marginal_offset
+    - ``"REJECT"``   — usable_pct < threshold - marginal_offset
+
+    Args:
+        usable_pct: Percentage of usable pixels (0–100).
+        threshold: Minimum usable % to fully accept (default 90).
+        marginal_offset: Width of the marginal band below threshold (default 10).
+
+    Returns:
+        One of ``"ACCEPT"``, ``"MARGINAL"``, ``"REJECT"``.
+    """
+    if usable_pct >= threshold:
+        return "ACCEPT"
+    if usable_pct >= threshold - marginal_offset:
+        return "MARGINAL"
+    return "REJECT"

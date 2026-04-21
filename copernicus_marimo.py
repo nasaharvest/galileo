@@ -714,31 +714,43 @@ def _(
     This cell:
     1. Extracts dates from filenames and creates metadata
     2. Pre-processes ALL images into memory (cached)
-    3. Creates slider widget for navigation
+    3. Runs quality assessment (S1: invalid pixels / border noise, S2: cloud/shadow)
+    4. Creates slider widget for navigation
 
     Pre-processing happens once, making slider interactions instant.
-    The crop_to_bbox option controls whether to show full context or just target area.
 
-    For S1+S2 mode: Visualizes S2 images (optical), but both S1 and S2 are available for export.
+    For S1+S2 mode: Both S1 and S2 tiles are processed, quality-checked, and
+    shown in the viewer sorted by date. Each tile carries its own badge.
     """
     time_slider = None
     file_metadata = []
     cached_images = []
 
-    # Determine which files to visualize
-    _files_to_visualize = []
-    _viz_satellite_type = satellite_type.value
+    # Build a list of (file_path, sat_type) tuples to process
+    _work_items = []
 
     if satellite_type.value == "S1+S2":
-        # For S1+S2, visualize S2 images (more intuitive for users)
-        if isinstance(downloaded_files, dict) and "s2" in downloaded_files:
-            _files_to_visualize = downloaded_files["s2"]
-            _viz_satellite_type = "S2"
-    elif downloaded_files and not isinstance(downloaded_files, dict):
-        # Single satellite type (S1 or S2)
-        _files_to_visualize = downloaded_files
+        if isinstance(downloaded_files, dict):
+            for _f in downloaded_files.get("s2", []):
+                _work_items.append((_f, "S2"))
+            for _f in downloaded_files.get("s1", []):
+                _work_items.append((_f, "S1"))
+    elif (
+        satellite_type.value == "S2"
+        and downloaded_files
+        and not isinstance(downloaded_files, dict)
+    ):
+        for _f in downloaded_files:
+            _work_items.append((_f, "S2"))
+    elif (
+        satellite_type.value == "S1"
+        and downloaded_files
+        and not isinstance(downloaded_files, dict)
+    ):
+        for _f in downloaded_files:
+            _work_items.append((_f, "S1"))
 
-    if _files_to_visualize and len(_files_to_visualize) > 0:
+    if _work_items:
         # Show progress while pre-processing
         with mo.status.spinner(title="Pre-processing images for fast slider...") as _spinner:
             import re
@@ -747,9 +759,15 @@ def _(
             _bbox = [min_lon.value, min_lat.value, max_lon.value, max_lat.value]
             _use_bbox = crop_to_bbox.value  # User's choice
 
+            # Import quality functions
+            from src.data.copernicus.quality import (
+                assess_s1_quality,
+                assess_s2_quality,
+            )
+
             # Extract dates and pre-process images
-            for _idx, _file_path in enumerate(_files_to_visualize):
-                _spinner.update(title=f"Processing image {_idx + 1}/{len(_files_to_visualize)}...")
+            for _idx, (_file_path, _sat) in enumerate(_work_items):
+                _spinner.update(title=f"Processing {_sat} image {_idx + 1}/{len(_work_items)}...")
 
                 _filename = _file_path.name
 
@@ -766,15 +784,13 @@ def _(
                 # Pre-process the image based on satellite type
                 _processed_data = None
                 try:
-                    if _viz_satellite_type == "S2":
-                        # Sentinel-2: Extract RGB composite
+                    if _sat == "S2":
                         from src.data.copernicus.image_processing import extract_rgb_composite
 
                         _processed_data = extract_rgb_composite(
                             _file_path, bbox=_bbox if _use_bbox else None
                         )
                     else:
-                        # Sentinel-1: Extract SAR data (VV polarization)
                         from src.data.copernicus.image_processing import extract_sar_composite
 
                         _processed_data = extract_sar_composite(
@@ -787,6 +803,17 @@ def _(
                         _processed_data is not None
                         and _processed_data.get("bounds_wgs84") is not None
                     ):
+                        # --- Quality assessment ---
+                        _quality_report = None
+
+                        _spinner.update(
+                            title=f"Quality check {_sat} {_idx + 1}/{len(_work_items)}..."
+                        )
+                        if _sat == "S1":
+                            _quality_report = assess_s1_quality(_file_path)
+                        else:
+                            _quality_report = assess_s2_quality(_file_path)
+
                         # Store metadata and cached image data
                         file_metadata.append(
                             {
@@ -794,6 +821,8 @@ def _(
                                 "date": _date_obj,
                                 "date_str": _date_display,
                                 "filename": _filename,
+                                "sat_type": _sat,
+                                "quality_report": _quality_report,
                             }
                         )
                         cached_images.append(_processed_data)
@@ -852,8 +881,8 @@ def _(cached_images, mo, satellite_type):
             # S1: Show SAR recipes only
             _recipe_names = [r.name for rid, r in _recipes.items() if rid.startswith("sar_")]
         else:  # S1+S2
-            # S1+S2: Show optical recipes (visualizing S2)
-            _recipe_names = [r.name for rid, r in _recipes.items() if not rid.startswith("sar_")]
+            # S1+S2: Show all recipes (both optical and SAR tiles are in the viewer)
+            _recipe_names = [r.name for rid, r in _recipes.items()]
 
         if _recipe_names:
             band_recipe_selector = mo.ui.dropdown(
@@ -865,47 +894,139 @@ def _(cached_images, mo, satellite_type):
 
 
 @app.cell
-def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
-    """Display time slider and adjustment sliders in a compact side-by-side layout."""
+def _(cached_images, file_metadata, mo):
+    """Create quality threshold sliders (separate cell so they don't reset on interaction)."""
+    s2_quality_threshold = None
+    s1_quality_threshold = None
+    s2_nodata_threshold = None
+
+    if cached_images and len(cached_images) > 0:
+        # Check which satellite types are present
+        _has_s2 = any(m.get("sat_type") == "S2" for m in file_metadata)
+        _has_s1 = any(m.get("sat_type") == "S1" for m in file_metadata)
+
+        if _has_s2:
+            s2_quality_threshold = mo.ui.slider(
+                start=0,
+                stop=100,
+                step=5,
+                value=50,
+                label="S2 min usable % (cloud/shadow filter)",
+                show_value=True,
+            )
+            s2_nodata_threshold = mo.ui.slider(
+                start=0,
+                stop=100,
+                step=5,
+                value=20,
+                label="S2 max nodata % (data gap filter)",
+                show_value=True,
+            )
+        if _has_s1:
+            s1_quality_threshold = mo.ui.slider(
+                start=0,
+                stop=100,
+                step=5,
+                value=50,
+                label="S1 min usable % (invalid pixel filter)",
+                show_value=True,
+            )
+
+    return (s1_quality_threshold, s2_nodata_threshold, s2_quality_threshold)
+
+
+@app.cell
+def _(
+    band_recipe_selector,
+    cached_images,
+    file_metadata,
+    mo,
+    s1_quality_threshold,
+    s2_nodata_threshold,
+    s2_quality_threshold,
+    time_slider,
+):
+    """Display time slider, quality filter, and adjustment sliders."""
     slider_display = None
     contrast_slider = None
     brightness_slider = None
     gamma_slider = None
+    filtered_indices = []
 
     if cached_images and len(cached_images) > 0:
-        # Create adjustment sliders (0-100 range, will be normalized in visualization)
+        # Compute filtered indices — each sat type uses its own thresholds
+        _s2_thresh = s2_quality_threshold.value if s2_quality_threshold is not None else 0
+        _s1_thresh = s1_quality_threshold.value if s1_quality_threshold is not None else 0
+        _s2_nodata_max = s2_nodata_threshold.value if s2_nodata_threshold is not None else 100
+
+        for _i, _meta in enumerate(file_metadata):
+            _qr = _meta.get("quality_report")
+            if _qr is None:
+                filtered_indices.append(_i)
+                continue
+            _sat = _meta.get("sat_type", "S2")
+            if _sat == "S2":
+                # S2: check usable % AND nodata %
+                _nodata_total = _qr.get("nodata_pct", 0) + _qr.get("defective_pct", 0)
+                if _qr["usable_pct"] >= _s2_thresh and _nodata_total <= _s2_nodata_max:
+                    filtered_indices.append(_i)
+            else:
+                # S1: check usable % only
+                if _qr["usable_pct"] >= _s1_thresh:
+                    filtered_indices.append(_i)
+
+        _total = len(file_metadata)
+        _kept = len(filtered_indices)
+        _removed = _total - _kept
+
+        # Create adjustment sliders
         contrast_slider = mo.ui.slider(
             start=0,
             stop=100,
             step=1,
-            value=50,  # 50 = 1.0x (no change)
+            value=50,
             label="Contrast",
             show_value=True,
         )
-
         brightness_slider = mo.ui.slider(
             start=0,
             stop=100,
             step=1,
-            value=50,  # 50 = 0.0 (no change)
+            value=50,
             label="Brightness",
             show_value=True,
         )
-
         gamma_slider = mo.ui.slider(
             start=0,
             stop=100,
             step=1,
-            value=50,  # 50 = 1.0 (no change)
+            value=50,
             label="Gamma",
             show_value=True,
         )
 
-        # Build the layout based on whether we have time slider
+        # Build the layout
         if time_slider is not None and len(file_metadata) > 1:
-            # Get current selection
             _current_idx = time_slider.value
             _current_meta = file_metadata[_current_idx]
+
+            # Quality filter summary
+            if _removed > 0:
+                _filter_summary = mo.md(
+                    f"**Showing {_kept} of {_total} images** ({_removed} filtered out)"
+                )
+            else:
+                _filter_summary = mo.md(f"**All {_total} images pass** quality filters")
+
+            # Build quality filter controls
+            _quality_controls = [mo.md("**Quality filter**")]
+            if s2_quality_threshold is not None:
+                _quality_controls.append(s2_quality_threshold)
+            if s2_nodata_threshold is not None:
+                _quality_controls.append(s2_nodata_threshold)
+            if s1_quality_threshold is not None:
+                _quality_controls.append(s1_quality_threshold)
+            _quality_controls.append(_filter_summary)
 
             # Build adjustment controls
             _adjustment_controls = [
@@ -914,12 +1035,9 @@ def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
                 brightness_slider,
                 gamma_slider,
             ]
-
-            # Add band recipe selector if available
             if band_recipe_selector is not None:
                 _adjustment_controls.insert(1, band_recipe_selector)
 
-            # Create two-column layout: time slider on left, adjustments on right
             slider_display = mo.vstack(
                 [
                     mo.md(
@@ -930,14 +1048,16 @@ def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
                     ),
                     mo.hstack(
                         [
-                            # Left column: Time slider
+                            # Left column: Quality filters + time slider
                             mo.vstack(
-                                [
-                                    mo.md(f"**Navigate through {len(file_metadata)} images**"),
+                                _quality_controls
+                                + [
+                                    mo.md("---"),
+                                    mo.md(f"**Navigate through {_total} images**"),
                                     time_slider,
                                     mo.md(
                                         f"""
-                                        **Image {_current_idx + 1} of {len(file_metadata)}**
+                                        **Image {_current_idx + 1} of {_total}**
                                         Date: {_current_meta['date_str']}
                                         File: `{_current_meta['filename'][:40]}...`
                                         """
@@ -945,7 +1065,7 @@ def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
                                 ],
                                 align="start",
                             ),
-                            # Right column: Adjustment sliders and band recipe
+                            # Right column: Adjustment sliders
                             mo.vstack(_adjustment_controls, align="start"),
                         ],
                         justify="start",
@@ -953,18 +1073,22 @@ def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
                 ]
             )
         elif file_metadata and len(file_metadata) == 1:
-            # Build adjustment controls
             _adjustment_controls = [
                 contrast_slider,
                 brightness_slider,
                 gamma_slider,
             ]
-
-            # Add band recipe selector if available
             if band_recipe_selector is not None:
                 _adjustment_controls.insert(0, band_recipe_selector)
 
-            # Single image - just show adjustments compactly
+            _quality_widgets = []
+            if s2_quality_threshold is not None:
+                _quality_widgets.append(s2_quality_threshold)
+            if s2_nodata_threshold is not None:
+                _quality_widgets.append(s2_nodata_threshold)
+            if s1_quality_threshold is not None:
+                _quality_widgets.append(s1_quality_threshold)
+
             slider_display = mo.vstack(
                 [
                     mo.md(
@@ -975,6 +1099,9 @@ def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
                         **Date**: {file_metadata[0]['date_str']} | **File**: `{file_metadata[0]['filename'][:50]}...`
                         """
                     ),
+                ]
+                + _quality_widgets
+                + [
                     mo.hstack(_adjustment_controls, justify="start"),
                 ]
             )
@@ -983,6 +1110,7 @@ def _(band_recipe_selector, cached_images, file_metadata, mo, time_slider):
     return (
         brightness_slider,
         contrast_slider,
+        filtered_indices,
         gamma_slider,
     )
 
@@ -1053,12 +1181,16 @@ def _(
     contrast_slider,
     crop_to_bbox,
     file_metadata,
+    filtered_indices,
     gamma_slider,
     max_lat,
     max_lon,
     min_lat,
     min_lon,
     mo,
+    s1_quality_threshold,
+    s2_nodata_threshold,
+    s2_quality_threshold,
     satellite_type,
     time_slider,
     traceback,
@@ -1068,11 +1200,8 @@ def _(
     This cell displays pre-processed images from cache, making slider
     interactions nearly instant (no disk I/O or processing needed).
 
-    Visualization details:
-    - S2: Supports multiple band recipes (True Color, False Color, Agriculture, NDVI, NDWI)
-    - S1: VV polarization (grayscale) with adaptive contrast
-    - Both: Already cropped to target bbox during pre-processing
-    - Image adjustments applied in real-time based on slider values
+    Images that fall below the quality threshold show a semi-transparent
+    "FILTERED OUT" overlay so the user can still inspect them.
     """
     viz_result = None
 
@@ -1113,11 +1242,12 @@ def _(
             _needs_recipe_processing = False
 
             # Determine if we need to reprocess with recipe
+            _current_sat = _metadata.get("sat_type", satellite_type.value)
             if _selected_recipe is not None:
-                if satellite_type.value in ["S2", "S1+S2"]:
+                if _current_sat in ("S2",):
                     # S2: Reprocess if not True Color
                     _needs_recipe_processing = _selected_recipe != "True Color (RGB)"
-                elif satellite_type.value == "S1":
+                elif _current_sat in ("S1",):
                     # S1: Reprocess if not default SAR VV
                     _needs_recipe_processing = _selected_recipe != "SAR VV (Surface)"
 
@@ -1352,10 +1482,98 @@ def _(
                 ax.set_xlabel("Longitude (°E)", fontsize=12)
                 ax.set_ylabel("Latitude (°N)", fontsize=12)
 
-                # Update title to show recipe name
-                _recipe_name = _selected_recipe if _selected_recipe else satellite_type.value
+                # Update title to show recipe name and quality badge
+                _recipe_name = (
+                    _selected_recipe
+                    if _selected_recipe
+                    else _metadata.get("sat_type", satellite_type.value)
+                )
+
+                # Build quality badge string for S1 and S2 tiles
+                _quality_badge = ""
+                _is_filtered_out = False
+                _qr = _metadata.get("quality_report")
+                _current_sat = _metadata.get("sat_type", "S2")
+                if _qr is not None:
+                    # Pick the right threshold for this satellite type
+                    if _current_sat == "S2":
+                        _threshold_val = (
+                            s2_quality_threshold.value if s2_quality_threshold is not None else 50
+                        )
+                    else:
+                        _threshold_val = (
+                            s1_quality_threshold.value if s1_quality_threshold is not None else 50
+                        )
+
+                    from src.data.copernicus.quality import quality_gate as _qg
+
+                    _verdict = _qg(_qr["usable_pct"], threshold=_threshold_val)
+
+                    # S2: also reject if nodata exceeds threshold
+                    if _current_sat == "S2":
+                        _nodata_max = (
+                            s2_nodata_threshold.value if s2_nodata_threshold is not None else 100
+                        )
+                        _nodata_total = _qr.get("nodata_pct", 0) + _qr.get("defective_pct", 0)
+                        if _nodata_total > _nodata_max and _verdict != "REJECT":
+                            _verdict = "REJECT"
+
+                    _is_filtered_out = _selected_idx not in filtered_indices
+                    if _verdict == "ACCEPT":
+                        _quality_badge = f"  🟢 ACCEPT — {_qr['usable_pct']:.1f}% usable"
+                    elif _verdict == "MARGINAL":
+                        _quality_badge = f"  🟡 MARGINAL — {_qr['usable_pct']:.1f}% usable"
+                    else:
+                        _quality_badge = f"  🔴 REJECT — {_qr['usable_pct']:.1f}% usable"
+
+                    # S2-specific details
+                    if "cloud_pct" in _qr:
+                        _quality_badge += (
+                            f"  | ☁️ {_qr['cloud_pct']:.1f}%" f"  🌑 {_qr['shadow_pct']:.1f}%"
+                        )
+                        _nodata_val = _qr.get("nodata_pct", 0)
+                        _defective_val = _qr.get("defective_pct", 0)
+                        if _nodata_val > 0 or _defective_val > 0:
+                            _quality_badge += (
+                                f"  ⬛ {_nodata_val:.1f}% nodata"
+                                f"  🔧 {_defective_val:.1f}% defective"
+                            )
+                    # S1-specific details
+                    if _qr.get("border_noise_detected"):
+                        _quality_badge += "  ⚠️ border noise"
+                    if _qr.get("orbit_type"):
+                        _quality_badge += f"  | orbit: {_qr['orbit_type']}"
+
+                # Add "FILTERED OUT" overlay for rejected images
+                if _is_filtered_out:
+                    ax.add_patch(
+                        plt.Rectangle(
+                            (0, 0),
+                            1,
+                            1,
+                            transform=ax.transAxes,
+                            facecolor="red",
+                            alpha=0.25,
+                            zorder=10,
+                        )
+                    )
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "⛔ FILTERED OUT",
+                        transform=ax.transAxes,
+                        ha="center",
+                        va="center",
+                        fontsize=28,
+                        fontweight="bold",
+                        color="red",
+                        alpha=0.7,
+                        zorder=11,
+                    )
+
                 _title = (
-                    f"{_recipe_name} - {_metadata['date_str']}\n{_metadata['filename'][:50]}..."
+                    f"{_recipe_name} - {_metadata['date_str']}\n"
+                    f"{_metadata['filename'][:50]}...{_quality_badge}"
                 )
                 ax.set_title(_title, fontsize=11, fontweight="bold")
 
